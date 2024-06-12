@@ -17,11 +17,11 @@ module i2s
 );
 
 always @(posedge clk) begin
-	reg  [7:0] bit_cnt;
+	reg [$clog2(AUDIO_DW)-1:0] bit_cnt;
 	reg msclk;
 
-	reg [AUDIO_DW-1:0] left;
-	reg [AUDIO_DW-1:0] right;
+	reg [AUDIO_DW-1:0] left  = 0;
+	reg [AUDIO_DW-1:0] right = 0;
 
 	if (reset) begin
 		bit_cnt <= 1;
