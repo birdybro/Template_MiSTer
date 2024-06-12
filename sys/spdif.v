@@ -65,7 +65,7 @@ reg         bit_toggle_q;
 
 reg         spdif_out_q;
 
-reg [5:0]   parity_count_q;
+reg         parity_count_q;
 
 reg         channel_status_bit_q;
 
@@ -296,7 +296,7 @@ begin
         else
         begin
             // Even number of high bits, make odd
-            if (parity_count_q[0] == 1'b0)
+            if (parity_count_q == 1'b0)
             begin
                 if (bit_toggle_q == 1'b0)
                     bit_r = ~spdif_out_q;
