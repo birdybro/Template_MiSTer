@@ -2,7 +2,7 @@ module scanlines #(parameter v2=0)
 (
 	input             clk,
 
-	input       [1:0] scanlines,
+	input       [2:0] scanlines,
 	input      [23:0] din,
 	input             hs_in,vs_in,
 	input             de_in,ce_in,
@@ -12,7 +12,7 @@ module scanlines #(parameter v2=0)
 	output reg        de_out,ce_out
 );
 
-reg [1:0] scanline;
+reg [2:0] scanline;
 always @(posedge clk) begin
 	reg old_hs, old_vs;
 
@@ -34,24 +34,29 @@ assign {r,g,b} = din;
 
 reg [23:0] d;
 always @(*) begin
-	case(scanline)
-		1: // reduce 25% = 1/2 + 1/4
-			d = {{1'b0, r[7:1]} + {2'b00, r[7:2]},
-			     {1'b0, g[7:1]} + {2'b00, g[7:2]},
-				  {1'b0, b[7:1]} + {2'b00, b[7:2]}};
+    case(scanline)
+        1: // reduce 25% = 1/2 + 1/4
+            d = {{1'b0, r[7:1]} + {2'b00, r[7:2]},
+                 {1'b0, g[7:1]} + {2'b00, g[7:2]},
+                 {1'b0, b[7:1]} + {2'b00, b[7:2]}};
 
-		2: // reduce 50% = 1/2
-			d = {{1'b0, r[7:1]},
-				  {1'b0, g[7:1]},
-				  {1'b0, b[7:1]}};
+        2: // reduce 50% = 1/2
+            d = {{1'b0, r[7:1]},
+                 {1'b0, g[7:1]},
+                 {1'b0, b[7:1]}};
 
-		3: // reduce 75% = 1/4
-			d = {{2'b00, r[7:2]},
-			     {2'b00, g[7:2]},
-				  {2'b00, b[7:2]}};
+        3: // reduce 75% = 1/4
+            d = {{2'b00, r[7:2]},
+                 {2'b00, g[7:2]},
+                 {2'b00, b[7:2]}};
 
-		default: d = {r,g,b};
-	endcase
+        4: // reduce 100% = 1/8
+            d = {{3'b000, r[7:3]},
+                 {3'b000, g[7:3]},
+                 {3'b000, b[7:3]}};
+
+        default: d = {r,g,b};
+    endcase
 end
 
 always @(posedge clk) begin

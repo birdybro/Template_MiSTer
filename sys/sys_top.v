@@ -1633,7 +1633,7 @@ wire        clk_sys;
 wire [15:0] audio_l, audio_r;
 wire        audio_s;
 wire  [1:0] audio_mix;
-wire  [1:0] scanlines;
+wire  [2:0] scanlines;
 wire  [7:0] r_out, g_out, b_out, hr_out, hg_out, hb_out;
 wire        vs_fix, hs_fix, de_emu, vs_emu, hs_emu, f1;
 wire        hvs_fix, hhs_fix, hde_emu;
@@ -1705,9 +1705,9 @@ wire [13:0] fb_stride;
 	assign fb_stride = 0;
 `endif
 
-reg  [1:0] sl_r;
-wire [1:0] sl = sl_r;
-always @(posedge clk_sys) sl_r <= FB_EN ? 2'b00 : scanlines;
+reg  [2:0] sl_r;
+wire [2:0] sl = sl_r;
+always @(posedge clk_sys) sl_r <= FB_EN ? 3'b00 : scanlines;
 
 emu emu
 (
