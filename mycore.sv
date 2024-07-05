@@ -55,6 +55,8 @@ module emu
 	input  [11:0] HDMI_HEIGHT,
 	output        HDMI_FREEZE,
 
+	output        SCALER_BLACKOUT, // When held high will output 3 black frames on every resolution switch
+
 `ifdef MISTER_FB
 	// Use framebuffer in DDRAM
 	// FB_FORMAT:
@@ -185,6 +187,8 @@ assign VGA_F1 = 0;
 assign VGA_SCALER  = 0;
 assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
+
+assign SCALER_BLACKOUT = 0;
 
 assign AUDIO_S = 0;
 assign AUDIO_L = 0;

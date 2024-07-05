@@ -331,6 +331,7 @@ reg [11:0] vs_line = 0;
 
 reg        scaler_out = 0;
 reg        vrr_mode = 0;
+wire       resSwitchBlackout;
 
 reg [31:0] aflt_rate = 7056000;
 reg [39:0] acx  = 4258969;
@@ -752,6 +753,7 @@ wire         freeze;
 		.vmax     (vmax),
 		.vrr      (vrr_mode),
 		.vrrmax   (HEIGHT + VBP + VS[11:0] + 12'd1),
+		.swblack  (resSwitchBlackout),
 
 		.mode     ({~lowlat,LFB_EN ? LFB_FLT : |scaler_flt,2'b00}),
 		.poly_clk (clk_sys),
@@ -1734,6 +1736,7 @@ emu emu
 	.HDMI_WIDTH(direct_video ? 12'd0 : hdmi_width),
 	.HDMI_HEIGHT(direct_video ? 12'd0 : hdmi_height),
 	.HDMI_FREEZE(freeze),
+	.SCALER_BLACKOUT(resSwitchBlackout),
 
 	.CLK_VIDEO(clk_vid),
 	.CE_PIXEL(ce_pix),
