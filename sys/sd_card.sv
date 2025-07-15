@@ -85,6 +85,11 @@ localparam PREF_STATE_IDLE     = 0;
 localparam PREF_STATE_RD       = 1;
 localparam PREF_STATE_FINISH   = 2;
 
+reg [10:0] buffer_addr_reg;
+always @(posedge clk_spi) begin
+    buffer_addr_reg <= {spi_buf,buffer_ptr};
+end
+
 altsyncram sdbuf
 (
 	.clock0    (clk_sys),
@@ -94,7 +99,7 @@ altsyncram sdbuf
 	.q_a       (sd_buff_din),
 
 	.clock1    (clk_spi),
-	.address_b ({spi_buf,buffer_ptr}),
+	.address_b (buffer_addr_reg),
 	.data_b    (buffer_din),
 	.wren_b    (buffer_wr),
 	.q_b       (buffer_dout),
