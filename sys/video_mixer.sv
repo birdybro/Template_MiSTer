@@ -175,6 +175,8 @@ always @(posedge CLK_VIDEO) begin
 	reg old_hde;
 	reg old_ce;
 	reg ce_osc, fs_osc;
+	reg ce_pix_mux;    // NEW: intermediate register
+	reg ce_pix_final;  // NEW: final stage register
 	
 	old_ce <= ce_pix;
 	ce_osc <= ce_osc | (old_ce ^ ce_pix);
@@ -185,7 +187,10 @@ always @(posedge CLK_VIDEO) begin
 		ce_osc <= 0;
 	end
 
-	CE_PIXEL <= scandoubler ? ce_pix_sd : fs_osc ? (~old_ce & ce_pix) : ce_pix;
+	// Split combinatorial logic into pipeline stages
+	ce_pix_mux <= fs_osc ? (~old_ce & ce_pix) : ce_pix;
+	ce_pix_final <= scandoubler ? ce_pix_sd : ce_pix_mux;
+	CE_PIXEL <= ce_pix_final;
 
 	if(!GAMMA && HALF_DEPTH) begin
 		r <= {rt,rt};
