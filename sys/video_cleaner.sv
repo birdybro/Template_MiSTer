@@ -47,8 +47,7 @@ module video_cleaner
 );
 
 wire hs, vs;
-s_fix sync_v(clk_vid, HSync, hs);
-s_fix sync_h(clk_vid, VSync, vs);
+s_fix_dual sync_dual(clk_vid, HSync, VSync, hs, vs);
 
 wire hbl = hs | HBlank;
 wire vbl = vs | VBlank;
@@ -78,31 +77,39 @@ end
 
 endmodule
 
-module s_fix
-(
-	input clk,
-	
-	input sync_in,
-	output sync_out
+// Optimized merged module
+module s_fix_dual (
+    input clk,
+    input sync_h_in,
+    input sync_v_in,
+    output sync_h_out,
+    output sync_v_out
 );
-
-assign sync_out = sync_in ^ pol;
-
-reg pol;
-always @(posedge clk) begin
-	integer pos = 0, neg = 0, cnt = 0;
-	reg s1,s2;
-
-	s1 <= sync_in;
-	s2 <= s1;
-
-	if(~s2 & s1) neg <= cnt;
-	if(s2 & ~s1) pos <= cnt;
-
-	cnt <= cnt + 1;
-	if(s2 != s1) cnt <= 0;
-
-	pol <= pos > neg;
-end
-
+    assign sync_h_out = sync_h_in ^ pol_h;
+    assign sync_v_out = sync_v_in ^ pol_v;
+    
+    reg pol_h, pol_v;
+    always @(posedge clk) begin
+        integer pos_h = 0, neg_h = 0, cnt_h = 0;
+        integer pos_v = 0, neg_v = 0, cnt_v = 0;
+        reg s1_h, s2_h, s1_v, s2_v;
+        
+        // Shared pipeline registers
+        s1_h <= sync_h_in; s2_h <= s1_h;
+        s1_v <= sync_v_in; s2_v <= s1_v;
+        
+        // H sync processing
+        if(~s2_h & s1_h) neg_h <= cnt_h;
+        if(s2_h & ~s1_h) pos_h <= cnt_h;
+        cnt_h <= cnt_h + 1;
+        if(s2_h != s1_h) cnt_h <= 0;
+        pol_h <= pos_h > neg_h;
+        
+        // V sync processing (shared increment logic)
+        if(~s2_v & s1_v) neg_v <= cnt_v;
+        if(s2_v & ~s1_v) pos_v <= cnt_v;
+        cnt_v <= cnt_v + 1;
+        if(s2_v != s1_v) cnt_v <= 0;
+        pol_v <= pos_v > neg_v;
+    end
 endmodule
