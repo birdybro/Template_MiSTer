@@ -239,15 +239,15 @@ sysmem_HPS_fpga_interfaces fpga_interfaces (
 
 wire hps_h2f_reset_n;
 
-reg init_reset_n = 0;
+reg init_reset_n = 1'b0;
+reg [20:0] timeout = 21'b0;  // 21 bits for 2M count
 always @(posedge clock) begin
-	integer timeout = 0;
-
-	if(timeout < 2000000) begin
-		init_reset_n <= 0;
-		timeout <= timeout + 1;
-	end
-	else init_reset_n <= 1;
+    if (timeout < 21'd2000000) begin
+        init_reset_n <= 1'b0;
+        timeout <= timeout + 1'b1;
+    end else begin
+        init_reset_n <= 1'b1;
+    end
 end
 
 endmodule
