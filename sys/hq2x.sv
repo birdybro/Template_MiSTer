@@ -403,18 +403,37 @@ module Blend
 		op <= op0; i1 <= i10; i2 <= i20; i3 <= i30;
 	end
 
-	function  [34:0] mul24x3;
-		input  [23:0] op1;
-		input   [2:0] op2;
-	begin
-		mul24x3 = 0;
-		if(op2[0]) mul24x3 = mul24x3 + {op1[23:16], 4'b0000, op1[15:8], 4'b0000, op1[7:0]};
-		if(op2[1]) mul24x3 = mul24x3 + {op1[23:16], 4'b0000, op1[15:8], 4'b0000, op1[7:0], 1'b0};
-		if(op2[2]) mul24x3 = mul24x3 + {op1[23:16], 4'b0000, op1[15:8], 4'b0000, op1[7:0], 2'b00};
+	// Stage 1: Prepare multiplication operands
+	reg [23:0] mul_i1, mul_i2, mul_i3;
+	reg [2:0] mul_op1, mul_op2, mul_op3;
+	always @(posedge clk) if (clk_en) begin
+		mul_i1 <= i1; mul_op1 <= op[6:4];
+		mul_i2 <= i2; mul_op2 <= {op[3:2], !op[3:2]};
+		mul_i3 <= i3; mul_op3 <= {op[1:0], !op[3:2]};
 	end
-	endfunction
-
-	wire [35:0] res = {mul24x3(i1, op[6:4]), 1'b0} + mul24x3(i2, {op[3:2], !op[3:2]}) + mul24x3(i3, {op[1:0], !op[3:2]});
+	
+	// Stage 2: Perform multiplications (using optimized structure)
+	reg [34:0] mul_res1, mul_res2, mul_res3;
+	always @(posedge clk) if (clk_en) begin
+		// Optimized multiplication using shift-add
+		mul_res1 <= (mul_op1[0] ? {mul_i1[23:16], 4'h0, mul_i1[15:8], 4'h0, mul_i1[7:0]} : 35'h0) +
+					(mul_op1[1] ? {mul_i1[23:16], 4'h0, mul_i1[15:8], 4'h0, mul_i1[7:0], 1'b0} : 35'h0) +
+					(mul_op1[2] ? {mul_i1[23:16], 4'h0, mul_i1[15:8], 4'h0, mul_i1[7:0], 2'b00} : 35'h0);
+		
+		mul_res2 <= (mul_op2[0] ? {mul_i2[23:16], 4'h0, mul_i2[15:8], 4'h0, mul_i2[7:0]} : 35'h0) +
+					(mul_op2[1] ? {mul_i2[23:16], 4'h0, mul_i2[15:8], 4'h0, mul_i2[7:0], 1'b0} : 35'h0) +
+					(mul_op2[2] ? {mul_i2[23:16], 4'h0, mul_i2[15:8], 4'h0, mul_i2[7:0], 2'b00} : 35'h0);
+		
+		mul_res3 <= (mul_op3[0] ? {mul_i3[23:16], 4'h0, mul_i3[15:8], 4'h0, mul_i3[7:0]} : 35'h0) +
+					(mul_op3[1] ? {mul_i3[23:16], 4'h0, mul_i3[15:8], 4'h0, mul_i3[7:0], 1'b0} : 35'h0) +
+					(mul_op3[2] ? {mul_i3[23:16], 4'h0, mul_i3[15:8], 4'h0, mul_i3[7:0], 2'b00} : 35'h0);
+	end
+	
+	// Stage 3: Final addition
+	reg [35:0] res;
+	always @(posedge clk) if (clk_en) begin
+		res <= {mul_res1, 1'b0} + mul_res2 + mul_res3;
+	end
 
 	always @(posedge clk) if (clk_en) Result <= {res[35:28],res[23:16],res[11:4]};
 
