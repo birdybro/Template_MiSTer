@@ -55,8 +55,8 @@ module arcade_video #(parameter WIDTH=320, DW=8, GAMMA=1)
 assign CLK_VIDEO = clk_video;
 
 wire hs_fix,vs_fix;
-sync_fix sync_v(CLK_VIDEO, HSync, hs_fix);
-sync_fix sync_h(CLK_VIDEO, VSync, vs_fix);
+sync_fix sync_h(CLK_VIDEO, HSync, hs_fix);
+sync_fix sync_v(CLK_VIDEO, VSync, vs_fix);
 
 reg [DW-1:0] RGB_fix;
 
