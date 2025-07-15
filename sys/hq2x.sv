@@ -65,9 +65,36 @@ reg  curbuf;
 reg  prevbuf = 0;
 wire iobuf = !curbuf;
 
+// Pre-register multiplexer inputs to reduce combinational depth
+reg [23:0] diffcheck0_input, diffcheck1_input, X_input;
+always @(posedge clk) if (ce_in) begin
+	case(cyc)
+		0: begin
+			diffcheck0_input <= Prev0;
+			diffcheck1_input <= Prev1;
+			X_input <= A;
+		end
+		1: begin
+			diffcheck0_input <= Curr0;
+			diffcheck1_input <= Next0;
+			X_input <= Prev1;
+		end
+		2: begin
+			diffcheck0_input <= Prev2;
+			diffcheck1_input <= Curr2;
+			X_input <= Next1;
+		end
+		3: begin
+			diffcheck0_input <= Next1;
+			diffcheck1_input <= Next2;
+			X_input <= G;
+		end
+	endcase
+end
+
 wire diff0, diff1;
-DiffCheck diffcheck0(Curr1, (cyc == 0) ? Prev0 : (cyc == 1) ? Curr0 : (cyc == 2) ? Prev2 : Next1, diff0);
-DiffCheck diffcheck1(Curr1, (cyc == 0) ? Prev1 : (cyc == 1) ? Next0 : (cyc == 2) ? Curr2 : Next2, diff1);
+DiffCheck diffcheck0(clk, ce_in, Curr1, diffcheck0_input, diff0);
+DiffCheck diffcheck1(clk, ce_in, Curr1, diffcheck1_input, diff1);
 
 wire [7:0] new_pattern = {diff1, diff0, pattern[7:2]};
 
