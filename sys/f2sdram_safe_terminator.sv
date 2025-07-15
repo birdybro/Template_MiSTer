@@ -146,21 +146,51 @@ always_ff @(posedge clk) begin
 	end
 end
 
-always_comb begin
+always_ff @(posedge clk) begin
+	reg next_state_write_reg;
+	reg [BURSTCOUNT_WIDTH-1:0] burstcount_master_reg;
+	reg [ADDRESS_WITDH-1:0] address_master_reg;
+	reg read_master_reg, write_master_reg;
+	reg [BYTEENABLE_WIDTH-1:0] byteenable_master_reg;
+
+	// Register state logic
 	if (!state_write) begin
 		if (valid_non_burst_write)
-			next_state_write = 1'b0;
+			next_state_write_reg <= 1'b0;
 		else if (write_slave)
-			next_state_write = 1'b1;
+			next_state_write_reg <= 1'b1;
 		else
-			next_state_write = 1'b0;
+			next_state_write_reg <= 1'b0;
 	end
 	else begin
 		if (burst_write_end)
-			next_state_write = 1'b0;
+			next_state_write_reg <= 1'b0;
 		else
-			next_state_write = 1'b1;
+			next_state_write_reg <= 1'b1;
 	end
+
+	// Register bus mux
+	if (terminating) begin
+		burstcount_master_reg <= burstcount_latch;
+		address_master_reg    <= address_latch;
+		read_master_reg       <= read_terminating;
+		write_master_reg      <= write_terminating;
+		byteenable_master_reg <= 0;
+	end
+	else begin
+		burstcount_master_reg <= burstcount_slave;
+		address_master_reg    <= address_slave;
+		read_master_reg       <= read_slave;
+		byteenable_master_reg <= byteenable_slave;
+		write_master_reg      <= write_slave;
+	end
+
+	state_write <= next_state_write_reg;
+	burstcount_master <= burstcount_master_reg;
+	address_master <= address_master_reg;
+	read_master <= read_master_reg;
+	write_master <= write_master_reg;
+	byteenable_master <= byteenable_master_reg;
 end
 
 reg [BURSTCOUNT_WIDTH-1:0] write_terminate_counter = 0;
@@ -218,26 +248,6 @@ always_ff @(posedge clk) begin
 		// Continue write transaction until the end
 		if (!waitrequest_master) write_terminate_counter <= write_terminate_counter + 1'd1;
 		if (write_terminate_counter == burstcount_latch - 1'd1) write_terminating <= 0;
-	end
-end
-
-/*
-* Bus mux depending on the stage.
-*/
-always_comb begin
-	if (terminating) begin
-		burstcount_master = burstcount_latch;
-		address_master    = address_latch;
-		read_master       = read_terminating;
-		write_master      = write_terminating;
-		byteenable_master = 0;
-	end
-	else begin
-		burstcount_master = burstcount_slave;
-		address_master    = address_slave;
-		read_master       = read_slave;
-		byteenable_master = byteenable_slave;
-		write_master      = write_slave;
 	end
 end
 
