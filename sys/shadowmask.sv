@@ -87,6 +87,9 @@ always @(posedge clk) begin
 	reg [11:0] vid;
 	reg  [7:0] r1,   g1,   b1;
 	reg  [7:0] r2,   g2,   b2;
+	// Split partial products into separate pipeline stages
+	reg  [7:0] r3_p0, r3_p1, g3_p0, g3_p1, b3_p0, b3_p1;
+	reg  [8:0] r3_p2, r3_p3, r3_p4, g3_p2, g3_p3, g3_p4, b3_p2, b3_p3, b3_p4;
 	reg  [7:0] r3_x, g3_x, b3_x; // 6.25% + 12.5%
 	reg  [8:0] r3_y, g3_y, b3_y; // 25% + 50% + 100%
 	reg  [8:0] r4,   g4,   b4;
@@ -98,13 +101,35 @@ always @(posedge clk) begin
 	// C2 - relax timings
 	{r2,g2,b2} <= {r1,g1,b1};
 
-	// C3 - perform multiplications
-	r3_x <= ({4{r_mul[0]}} & r2[7:4]) + ({8{r_mul[1]}} & r2[7:3]);
-	r3_y <= ({6{r_mul[2]}} & r2[7:2]) + ({7{r_mul[3]}} & r2[7:1]) + ({9{r_mul[4]}} & r2[7:0]);
-	g3_x <= ({4{g_mul[0]}} & g2[7:4]) + ({8{g_mul[1]}} & g2[7:3]);
-	g3_y <= ({6{g_mul[2]}} & g2[7:2]) + ({7{g_mul[3]}} & g2[7:1]) + ({9{g_mul[4]}} & g2[7:0]);
-	b3_x <= ({4{b_mul[0]}} & b2[7:4]) + ({8{b_mul[1]}} & b2[7:3]);
-	b3_y <= ({6{b_mul[2]}} & b2[7:2]) + ({7{b_mul[3]}} & b2[7:1]) + ({9{b_mul[4]}} & b2[7:0]);
+	// C3a - calculate partial products (shorter combinatorial paths)
+    r3_p0 <= {4{r_mul[0]}} & r2[7:4];
+    r3_p1 <= {8{r_mul[1]}} & r2[7:3];
+    r3_p2 <= {6{r_mul[2]}} & r2[7:2];
+    r3_p3 <= {7{r_mul[3]}} & r2[7:1];
+    r3_p4 <= {9{r_mul[4]}} & r2[7:0];
+    g3_p0 <= {4{g_mul[0]}} & g2[7:4];
+    g3_p1 <= {8{g_mul[1]}} & g2[7:3];
+    g3_p2 <= {6{g_mul[2]}} & g2[7:2];
+    g3_p3 <= {7{g_mul[3]}} & g2[7:1];
+    g3_p4 <= {9{g_mul[4]}} & g2[7:0];
+    b3_p0 <= {4{b_mul[0]}} & b2[7:4];
+    b3_p1 <= {8{b_mul[1]}} & b2[7:3];
+    b3_p2 <= {6{b_mul[2]}} & b2[7:2];
+    b3_p3 <= {7{b_mul[3]}} & b2[7:1];
+    b3_p4 <= {9{b_mul[4]}} & b2[7:0];
+
+    // C3b - add partial products (2-input additions only)
+    r3_x <= r3_p0 + r3_p1;
+    r3_y <= r3_p2 + r3_p3 + r3_p4;
+    g3_x <= g3_p0 + g3_p1;
+    g3_y <= g3_p2 + g3_p3 + g3_p4;
+    b3_x <= b3_p0 + b3_p1;
+    b3_y <= b3_p2 + b3_p3 + b3_p4;
+
+    // C4 - combine results
+    r4 <= r3_x + r3_y;
+    g4 <= g3_x + g3_y;
+    b4 <= b3_x + b3_y;
 
 	// C4 - combine results
 	r4 <= r3_x + r3_y;
