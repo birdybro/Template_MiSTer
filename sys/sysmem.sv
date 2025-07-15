@@ -42,7 +42,14 @@ module sysmem_lite
 	input          vbuf_write
 );
 
-assign reset_out = ~init_reset_n | ~hps_h2f_reset_n | reset_core_req;
+reg reset_out_reg;
+always @(posedge clock or negedge init_reset_n) begin
+    if (!init_reset_n)
+        reset_out_reg <= 1'b1;
+    else
+        reset_out_reg <= ~hps_h2f_reset_n | reset_core_req;
+end
+assign reset_out = reset_out_reg;
 
 ////////////////////////////////////////////////////////
 ////          f2sdram_safe_terminator_ram1          ////
