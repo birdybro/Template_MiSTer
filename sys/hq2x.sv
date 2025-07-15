@@ -270,28 +270,39 @@ endmodule
 
 module DiffCheck
 (
-	input [23:0] rgb1,
-	input [23:0] rgb2,
-	output       result
+	input             clk,
+	input             ce,
+	input [23:0]      rgb1,
+	input [23:0]      rgb2,
+	output reg        result
 );
 
-	wire [7:0] r = rgb1[7:1]   - rgb2[7:1];
-	wire [7:0] g = rgb1[15:9]  - rgb2[15:9];
-	wire [7:0] b = rgb1[23:17] - rgb2[23:17];
-	wire [8:0] t = $signed(r) + $signed(b);
-	wire [9:0] y = $signed(t) + $signed({g[7], g});
-	wire [8:0] u = $signed(r) - $signed(b);
-	wire [9:0] v = $signed({g, 1'b0}) - $signed(t);
+	// Stage 1: Color difference calculation
+	reg [7:0] r, g, b;
+	always @(posedge clk) if (ce) begin
+		r <= rgb1[7:1] - rgb2[7:1];
+		g <= rgb1[15:9] - rgb2[15:9];
+		b <= rgb1[23:17] - rgb2[23:17];
+	end
 
-	// if y is inside (-96..96)
-	wire y_inside = (y < 10'h60 || y >= 10'h3a0);
+	// Stage 2: YUV transformation
+	reg [8:0] t, u;
+	reg [9:0] y, v;
+	always @(posedge clk) if (ce) begin
+		t <= $signed(r) + $signed(b);
+		u <= $signed(r) - $signed(b);
+		y <= $signed(t) + $signed({g[7], g});
+		v <= $signed({g, 1'b0}) - $signed(t);
+	end
 
-	// if u is inside (-16, 16)
-	wire u_inside = (!u[8:4] || &u[8:4]); //(u < 9'h10 || u >= 9'h1f0);
-
-	// if v is inside (-24, 24)
-	wire v_inside = (v < 10'h18 || v >= 10'h3e8);
-	assign result = !(y_inside && u_inside && v_inside);
+	// Stage 3: Range checking (optimized comparisons)
+	reg y_inside, u_inside, v_inside;
+	always @(posedge clk) if (ce) begin
+		y_inside <= (y < 10'h60 || y >= 10'h3a0);
+		u_inside <= (!u[8:4] || &u[8:4]);
+		v_inside <= (v < 10'h18 || v >= 10'h3e8);
+		result <= !(y_inside && u_inside && v_inside);
+	end
 
 endmodule
 
