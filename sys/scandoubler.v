@@ -54,6 +54,7 @@ wire [7:0] pl = pix_len + 1'b1;
 reg  [7:0] pix_in_cnt = 0;
 wire [7:0] pc_in = pix_in_cnt + 1'b1;
 reg  [7:0] pixsz, pixsz2, pixsz4 = 0;
+reg  [7:0] pixsz_34;  // NEW: Pre-computed pixsz2 + pixsz4
 
 reg ce_x4i, ce_x1i;
 always @(posedge clk_vid) begin
@@ -65,15 +66,17 @@ always @(posedge clk_vid) begin
 	ce_x4i <= 0;
 	ce_x1i <= 0;
 
-	// use such odd comparison to place ce_x4 evenly if master clock isn't multiple of 4.
-	if((pc_in == pixsz4) || (pc_in == pixsz2) || (pc_in == (pixsz2+pixsz4))) ce_x4i <= 1;
+	// OPTIMIZED - use pre-computed value, no runtime addition
+	if((pix_in_cnt == pixsz4) || (pix_in_cnt == pixsz2) || (pix_in_cnt == pixsz_34)) ce_x4i <= 1;
+
 
 	old_ce <= ce_pix;
 	if(~old_ce & ce_pix) begin
 		if(valid & ~hb_in & ~vb_in) begin
-			pixsz  <= pl;
-			pixsz2 <= {1'b0,  pl[7:1]};
-			pixsz4 <= {2'b00, pl[7:2]};
+			pixsz  <= pix_len + 1'b1;
+			pixsz2 <= {1'b0,  pix_len[7:1]} + 1'b1;
+			pixsz4 <= {2'b00, pix_len[7:2]} + 1'b1;
+			pixsz_34 <= {2'b00, pix_len[7:2]} + {1'b0, pix_len[7:1]} + 1'b1;  // Pre-compute sum
 		end
 		pix_len <= 0;
 		valid <= 1;
