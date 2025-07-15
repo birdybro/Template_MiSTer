@@ -51,6 +51,8 @@ always @(posedge CLK_VIDEO) begin
 	reg [23:0] ARXG,ARYG;
 	reg [11:0] arx,ary;
 	reg  [1:0] vcalc;
+	reg [11:0] next_mul_arg1, next_mul_arg2;
+	reg        next_mul_start;
 
 	if (CE_PIXEL) begin
 		old_de <= VGA_DE_IN;
@@ -82,20 +84,35 @@ always @(posedge CLK_VIDEO) begin
 		aryo  <= ary;
 	end
 	else if (vcalc) begin
+		case(vcalc)
+			0: begin
+			    next_mul_arg1 <= arx;
+			    next_mul_arg2 <= vtot;
+			    next_mul_start <= 1;
+			end
+			1: begin
+			    next_mul_arg1 <= ary;
+			    next_mul_arg2 <= vcrop;
+			    next_mul_start <= 1;
+			end
+			2: begin
+			    next_mul_start <= 0;
+			end
+    	endcase
 		if(~mul_start & ~mul_run) begin
 			vcalc <= vcalc + 1'd1;
 			case(vcalc)
 				1: begin
-						mul_arg1  <= arx;
-						mul_arg2  <= vtot;
-						mul_start <= 1;
+						mul_arg1  <= next_mul_arg1;
+						mul_arg2  <= next_mul_arg2;
+						mul_start <= next_mul_start;
 					end
 
 				2: begin
 						ARXG      <= mul_res;
-						mul_arg1  <= ary;
-						mul_arg2  <= vcrop;
-						mul_start <= 1;
+						mul_arg1  <= next_mul_arg1;
+						mul_arg2  <= next_mul_arg2;
+						mul_start <= next_mul_start;
 					end
 
 				3: begin
