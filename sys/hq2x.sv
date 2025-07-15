@@ -162,13 +162,17 @@ reg  [DWIDTH1*2-1:0] outpixel_x2;
 
 assign outpixel = read_x[0] ? outpixel_x2[DWIDTH1*2-1:DWIDTH1] : outpixel_x2[DWIDTH:0];
 
+// Add pipeline register for memory address to improve timing
+reg [AWIDTH+1:0] rd_addr_reg;
+always @(posedge clk) if (ce_out) begin
+	rd_addr_reg <= {read_x[AWIDTH+1:1], read_y[1]};
+end
+
 hq2x_buf #(.NUMWORDS(LENGTH*2), .AWIDTH(AWIDTH+1), .DWIDTH(DWIDTH1*4-1)) hq2x_out
 (
 	.clock(clk),
-
-	.rdaddress({read_x[AWIDTH+1:1],read_y[1]}),
+	.rdaddress(rd_addr_reg),
 	.q(outpixel_x4),
-
 	.data(wrdata),
 	.wraddress(wrout_addr),
 	.wren(wrout_en)
