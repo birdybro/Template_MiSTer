@@ -270,6 +270,9 @@ reg  [2:0] fb_en = 0;
 reg [11:0] hsz = 320, vsz = 240;
 reg [11:0] bwidth;
 reg [22:0] bufsize;
+// Pipeline the multiplication
+reg [11:0] size_multiplier;
+reg [22:0] bufsize_calc;
 always @(posedge CLK_VIDEO) begin
 	reg [11:0] hcnt = 0, vcnt = 0;
 	reg old_vs, old_de;
@@ -293,7 +296,15 @@ always @(posedge CLK_VIDEO) begin
 			vcnt <= 0;
 			fb_en <= {fb_en[1:0], ~no_rotate | flip};
 		end
-		if(old_vs & ~VGA_VS) bufsize <= (do_flip ? vsz : hsz ) * stride;
+		// Stage 1: Select size
+		size_multiplier <= do_flip ? vsz : hsz;
+    
+		// Stage 2: Multiply (or use shift if stride is power of 2)
+		bufsize_calc <= size_multiplier * stride_reg;
+    
+		if(old_vs & ~VGA_VS) begin
+			bufsize <= bufsize_calc;
+		end
 	end
 end
 
