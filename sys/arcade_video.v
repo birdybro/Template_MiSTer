@@ -302,6 +302,18 @@ wire [13:0] stride = {bwidth[11:2], 4'd0};
 reg [22:0] ram_addr, next_addr;
 reg [31:0] ram_data;
 reg        ram_wr;
+// Pipeline stage 1: Pre-calculate base addresses
+reg [22:0] base_addr_cw, base_addr_ccw, base_addr_flip;
+reg [22:0] stride_reg;
+reg [13:0] hcnt_inc;
+// Pre-calculation stage
+always @(posedge CLK_VIDEO) begin
+    stride_reg <= stride;
+    base_addr_cw <= {vsz-1'd1, 2'b00};
+    base_addr_ccw <= bufsize - stride_reg;
+    base_addr_flip <= bufsize - 3'd4;
+    hcnt_inc <= rotate_ccw ? 3'd4 : -3'd4;
+end
 always @(posedge CLK_VIDEO) begin
 	reg [13:0] hcnt = 0;
 	reg old_vs, old_de;
@@ -312,22 +324,18 @@ always @(posedge CLK_VIDEO) begin
 		old_de <= VGA_DE;
 
 		if(~old_vs & VGA_VS) begin
-			next_addr <=
-				do_flip    ? bufsize-3'd4 :
-				rotate_ccw ? (bufsize - stride) : {vsz-1'd1, 2'b00};
+			next_addr <= do_flip ? base_addr_flip : 
+						rotate_ccw ? base_addr_ccw : base_addr_cw;
 			hcnt <= rotate_ccw ? 3'd4 : {vsz-2'd2, 2'b00};
 		end
 		if(VGA_DE) begin
-			ram_wr <= 1;
-			ram_data <= {8'd0,VGA_B,VGA_G,VGA_R};
-			ram_addr <= next_addr;
-			next_addr <=
-				do_flip    ? next_addr-3'd4 :
-				rotate_ccw ? (next_addr - stride) : (next_addr + stride);
+			next_addr <= do_flip ? (next_addr - 3'd4) :
+						rotate_ccw ? (next_addr - stride_reg) : 
+						(next_addr + stride_reg);
 		end
 		if(old_de & ~VGA_DE & ~do_flip) begin
-			next_addr <= rotate_ccw ? (bufsize - stride + hcnt) : hcnt;
-			hcnt <= rotate_ccw ? (hcnt + 3'd4) : (hcnt - 3'd4);
+			next_addr <= rotate_ccw ? (base_addr_ccw + hcnt) : hcnt;
+			hcnt <= hcnt + hcnt_inc;
 		end
 	end
 end
