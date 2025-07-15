@@ -238,7 +238,11 @@ function [1:0] buf_next;
 	end
 endfunction
 
-assign video_rotated = ~no_rotate;
+reg video_rotated_reg;
+always @(posedge CLK_VIDEO) begin
+    video_rotated_reg <= ~no_rotate_reg;
+end
+assign video_rotated = video_rotated_reg;
 
 always @(posedge CLK_VIDEO) begin
 	do_flip <= no_rotate && flip;
