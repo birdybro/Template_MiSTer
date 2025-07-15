@@ -31,6 +31,7 @@ always @(posedge clk_vid) begin
 	reg [7:0] R_in, G_in, B_in;
 	reg [7:0] R_gamma, G_gamma;
 	reg       hs,vs,hb,vb;
+	reg [7:0] gamma_prefetch;  // NEW: prefetch register
 	reg [1:0] ctr = 0;
 	reg       old_ce;
 
@@ -46,14 +47,26 @@ always @(posedge clk_vid) begin
 
 		ctr <= 1;
 		gamma_index <= {2'b00,RGB_in[23:16]};
+		// Pre-fetch G value while R is being processed
+		gamma_prefetch <= gamma_curve[{2'b01,RGB_in[15:8]}];
 	end
 
 	if (|ctr) ctr <= ctr + 1'd1;
 
 	case(ctr)
-		1: begin                   gamma_index <= {2'b01,G_in}; end
-		2: begin R_gamma <= gamma; gamma_index <= {2'b10,B_in}; end
-		3: begin G_gamma <= gamma; end
+		1: begin 
+			gamma_index <= {2'b01,G_in}; 
+			// Pre-fetch B value
+			gamma_prefetch <= gamma_curve[{2'b10,B_in}];
+		end        
+		2: begin 
+			R_gamma <= gamma; 
+			gamma_index <= {2'b10,B_in}; 
+			G_gamma <= gamma_prefetch; // Use pre-fetched value
+		end
+		3: begin 
+			// B gamma already available from pre-fetch
+		end
 	endcase
 end
 
