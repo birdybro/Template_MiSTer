@@ -59,9 +59,17 @@ wire         f2h_ram1_write;
 
 (* altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *) reg ram1_reset_0 = 1'b1;
 (* altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *) reg ram1_reset_1 = 1'b1;
-always @(posedge ram1_clk) begin
-	ram1_reset_0 <= reset_out;
-	ram1_reset_1 <= ram1_reset_0;
+(* altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *) reg ram1_reset_2 = 1'b1;
+always @(posedge ram1_clk or posedge reset_out) begin
+    if (reset_out) begin
+        ram1_reset_0 <= 1'b1;
+        ram1_reset_1 <= 1'b1;
+        ram1_reset_2 <= 1'b1;
+    end else begin
+        ram1_reset_0 <= 1'b0;
+        ram1_reset_1 <= ram1_reset_0;
+        ram1_reset_2 <= ram1_reset_1;
+    end
 end
 
 f2sdram_safe_terminator #(64, 8) f2sdram_safe_terminator_ram1
