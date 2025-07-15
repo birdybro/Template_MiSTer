@@ -60,20 +60,25 @@ sync_fix sync_v(CLK_VIDEO, VSync, vs_fix);
 
 reg [DW-1:0] RGB_fix;
 
-reg CE,HS,VS,HBL,VBL;
-always @(posedge CLK_VIDEO) begin
-	reg old_ce;
-	old_ce <= ce_pix;
-	CE <= 0;
-	if(~old_ce & ce_pix) begin
-		CE <= 1;
-		HS <= hs_fix;
-		if(~HS & hs_fix) VS <= vs_fix;
+reg [4:0] sync_signals; // {VBL, HBL, VS, HS, CE}
+wire VBL = sync_signals[4];
+wire HBL = sync_signals[3];
+wire VS = sync_signals[2];
+wire HS = sync_signals[1];
+wire CE = sync_signals[0];
 
-		RGB_fix <= RGB_in;
-		HBL <= HBlank;
-		if(HBL & ~HBlank) VBL <= VBlank;
-	end
+always @(posedge CLK_VIDEO) begin
+    reg old_ce;
+    old_ce <= ce_pix;
+    sync_signals[0] <= 0; // CE
+    if(~old_ce & ce_pix) begin
+        sync_signals[0] <= 1; // CE
+        sync_signals[1] <= hs_fix; // HS
+        if(~sync_signals[1] & hs_fix) sync_signals[2] <= vs_fix; // VS
+        RGB_fix <= RGB_in;
+        sync_signals[3] <= HBlank; // HBL
+        if(sync_signals[3] & ~HBlank) sync_signals[4] <= VBlank; // VBL
+    end
 end
 
 wire [7:0] R,G,B;
