@@ -96,7 +96,19 @@ wire diff0, diff1;
 DiffCheck diffcheck0(clk, ce_in, Curr1, diffcheck0_input, diff0);
 DiffCheck diffcheck1(clk, ce_in, Curr1, diffcheck1_input, diff1);
 
-wire [7:0] new_pattern = {diff1, diff0, pattern[7:2]};
+// Pre-calculate pattern permutations to reduce logic depth
+reg [7:0] pattern_perm[4];
+always @(posedge clk) if (ce_in) begin
+	case(cyc)
+		0: pattern_perm[0] <= {diff1, diff0, pattern[7:2]};
+		1: pattern_perm[1] <= {pattern_perm[0][5], pattern_perm[0][3], pattern_perm[0][0], pattern_perm[0][6], pattern_perm[0][1], pattern_perm[0][7], pattern_perm[0][4], pattern_perm[0][2]};
+		2: pattern_perm[2] <= {pattern_perm[1][5], pattern_perm[1][3], pattern_perm[1][0], pattern_perm[1][6], pattern_perm[1][1], pattern_perm[1][7], pattern_perm[1][4], pattern_perm[1][2]};
+		3: pattern_perm[3] <= {pattern_perm[2][5], pattern_perm[2][3], pattern_perm[2][0], pattern_perm[2][6], pattern_perm[2][1], pattern_perm[2][7], pattern_perm[2][4], pattern_perm[2][2]};
+	endcase
+end
+
+// Use pre-calculated permutation
+wire [7:0] new_pattern = pattern_perm[cyc];
 
 wire [23:0] X = (cyc == 0) ? A : (cyc == 1) ? Prev1 : (cyc == 2) ? Next1 : G;
 wire [23:0] blend_result_pre;
