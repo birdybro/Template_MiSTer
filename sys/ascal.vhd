@@ -308,42 +308,7 @@ ARCHITECTURE rtl OF ascal IS
 	
 	CONSTANT BLEN_ADAPTIVE : natural := calc_burst_size(N_BURST/8, MASK);
 
-	-- Parameter validation assertions for design integrity
-	-- These will catch configuration errors at compile time
-	
-	-- Resolution validation
-	ASSERT OHRES >= 1024 AND OHRES <= 4096
-		REPORT "OHRES must be between 1024 and 4096 pixels"
-		SEVERITY ERROR;
-		
-	ASSERT IHRES >= 256 AND IHRES <= 2048  
-		REPORT "IHRES must be between 256 and 2048 pixels"
-		SEVERITY ERROR;
-		
-	-- Power of 2 validation for IHRES
-	ASSERT (IHRES AND (IHRES-1)) = 0
-		REPORT "IHRES must be a power of 2"
-		SEVERITY ERROR;
-		
-	-- Data width validation
-	ASSERT N_DW = 64 OR N_DW = 128
-		REPORT "N_DW must be 64 or 128 bits"
-		SEVERITY ERROR;
-		
-	-- Address width validation
-	ASSERT N_AW >= 8 AND N_AW <= 32
-		REPORT "N_AW must be between 8 and 32 bits" 
-		SEVERITY ERROR;
-		
-	-- Fractional bits validation
-	ASSERT FRAC >= 4 AND FRAC <= 8
-		REPORT "FRAC must be between 4 and 8 bits"
-		SEVERITY ERROR;
-		
-	-- Burst size validation
-	ASSERT (N_BURST AND (N_BURST-1)) = 0
-		REPORT "N_BURST must be a power of 2"
-		SEVERITY ERROR;
+	-- Parameter validation will be done in the architecture body
 		
 	ASSERT N_BURST >= 64 AND N_BURST <= 1024
 		REPORT "N_BURST must be between 64 and 1024 bytes"
@@ -727,15 +692,20 @@ ARCHITECTURE rtl OF ascal IS
 	SIGNAL dsp_shared : type_dsp_shared;
 	
 	-- Optimized DSP block instantiation based on MASK
-	CONSTANT NUM_DSP_BLOCKS : natural := 
-		(4 WHEN MASK(MASK_POLY)='1' ELSE 0) +
-		(2 WHEN MASK(MASK_BICUBIC)='1' ELSE 0) +
-		(1 WHEN MASK(MASK_BILINEAR)='1' OR MASK(MASK_SHARP_BILINEAR)='1' ELSE 0);
+	-- Function to calculate number of DSP blocks based on MASK
+	FUNCTION calc_dsp_blocks(mask_val : unsigned(7 DOWNTO 0)) RETURN natural IS
+	BEGIN
+		RETURN (4 * boolean'pos(mask_val(MASK_POLY)='1')) +
+		       (2 * boolean'pos(mask_val(MASK_BICUBIC)='1')) +
+		       (1 * boolean'pos(mask_val(MASK_BILINEAR)='1' OR mask_val(MASK_SHARP_BILINEAR)='1'));
+	END FUNCTION;
+	
+	CONSTANT NUM_DSP_BLOCKS : natural := calc_dsp_blocks(MASK);
 
 	-----------------------------------------------------------------------------
 	FUNCTION shift_ishift(shift : unsigned(0 TO 119);
-												pix   : type_pix;
-												format : unsigned(1 DOWNTO 0)) RETURN unsigned IS
+	                      pix   : type_pix;
+	                      format : unsigned(1 DOWNTO 0)) RETURN unsigned IS
 	BEGIN
 		CASE format IS
 			WHEN "01" => -- 24bpp
@@ -1501,6 +1471,43 @@ ARCHITECTURE rtl OF ascal IS
 	END PROCESS DSP_Optimization;
 
 BEGIN
+
+	-- Parameter validation assertions for design integrity
+	-- These will catch configuration errors at compile time
+	
+	-- Resolution validation
+	ASSERT OHRES >= 1024 AND OHRES <= 4096
+		REPORT "OHRES must be between 1024 and 4096 pixels"
+		SEVERITY ERROR;
+		
+	ASSERT IHRES >= 256 AND IHRES <= 2048  
+		REPORT "IHRES must be between 256 and 2048 pixels"
+		SEVERITY ERROR;
+		
+	-- Power of 2 validation for IHRES
+	ASSERT (IHRES AND (IHRES-1)) = 0
+		REPORT "IHRES must be a power of 2"
+		SEVERITY ERROR;
+		
+	-- Data width validation
+	ASSERT N_DW = 64 OR N_DW = 128
+		REPORT "N_DW must be 64 or 128 bits"
+		SEVERITY ERROR;
+		
+	-- Address width validation
+	ASSERT N_AW >= 8 AND N_AW <= 32
+		REPORT "N_AW must be between 8 and 32 bits" 
+		SEVERITY ERROR;
+		
+	-- Fractional bits validation
+	ASSERT FRAC >= 4 AND FRAC <= 8
+		REPORT "FRAC must be between 4 and 8 bits"
+		SEVERITY ERROR;
+		
+	-- Burst size validation
+	ASSERT (N_BURST AND (N_BURST-1)) = 0
+		REPORT "N_BURST must be a power of 2"
+		SEVERITY ERROR;
 
 	-- Conditional Resource Allocation based on MASK generic
 	-- Generate statements to only instantiate needed interpolation resources
