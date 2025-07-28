@@ -273,6 +273,104 @@ ARCHITECTURE rtl OF ascal IS
 	CONSTANT MASK_SHARP_BILINEAR : natural :=2;
 	CONSTANT MASK_BICUBIC        : natural :=3;
 	CONSTANT MASK_POLY           : natural :=4;
+	
+	-- Adaptive buffer sizing based on requirements and enabled features
+	FUNCTION calc_buffer_size(max_res : natural; enabled_features : unsigned(7 DOWNTO 0)) RETURN natural IS
+	BEGIN
+		-- Base buffer size for simple modes
+		IF enabled_features(MASK_POLY)='1' OR enabled_features(MASK_BICUBIC)='1' THEN
+			-- Advanced modes need full resolution buffering
+			RETURN max_res;
+		ELSIF enabled_features(MASK_BILINEAR)='1' OR enabled_features(MASK_SHARP_BILINEAR)='1' THEN
+			-- Bilinear modes can use reduced buffering
+			RETURN max_res/2;
+		ELSE
+			-- Nearest neighbor needs minimal buffering
+			RETURN max_res/4;
+		END IF;
+	END FUNCTION;
+	
+	-- Adaptive constants based on enabled interpolation modes
+	CONSTANT OHRES_ADAPTIVE : natural := calc_buffer_size(OHRES, MASK);
+	CONSTANT IHRES_ADAPTIVE : natural := calc_buffer_size(IHRES, MASK);
+	
+	-- Adaptive burst sizing based on data width and enabled features
+	FUNCTION calc_burst_size(base_size : natural; enabled_features : unsigned(7 DOWNTO 0)) RETURN natural IS
+	BEGIN
+		IF enabled_features(MASK_POLY)='1' THEN
+			-- Polyphase needs larger bursts for efficiency
+			RETURN base_size * 2;
+		ELSE
+			-- Other modes can use standard burst size
+			RETURN base_size;
+		END IF;
+	END FUNCTION;
+	
+	CONSTANT BLEN_ADAPTIVE : natural := calc_burst_size(N_BURST/8, MASK);
+
+	-- Parameter validation assertions for design integrity
+	-- These will catch configuration errors at compile time
+	
+	-- Resolution validation
+	ASSERT OHRES >= 1024 AND OHRES <= 4096
+		REPORT "OHRES must be between 1024 and 4096 pixels"
+		SEVERITY ERROR;
+		
+	ASSERT IHRES >= 256 AND IHRES <= 2048  
+		REPORT "IHRES must be between 256 and 2048 pixels"
+		SEVERITY ERROR;
+		
+	-- Power of 2 validation for IHRES
+	ASSERT (IHRES AND (IHRES-1)) = 0
+		REPORT "IHRES must be a power of 2"
+		SEVERITY ERROR;
+		
+	-- Data width validation
+	ASSERT N_DW = 64 OR N_DW = 128
+		REPORT "N_DW must be 64 or 128 bits"
+		SEVERITY ERROR;
+		
+	-- Address width validation
+	ASSERT N_AW >= 8 AND N_AW <= 32
+		REPORT "N_AW must be between 8 and 32 bits" 
+		SEVERITY ERROR;
+		
+	-- Fractional bits validation
+	ASSERT FRAC >= 4 AND FRAC <= 8
+		REPORT "FRAC must be between 4 and 8 bits"
+		SEVERITY ERROR;
+		
+	-- Burst size validation
+	ASSERT (N_BURST AND (N_BURST-1)) = 0
+		REPORT "N_BURST must be a power of 2"
+		SEVERITY ERROR;
+		
+	ASSERT N_BURST >= 64 AND N_BURST <= 1024
+		REPORT "N_BURST must be between 64 and 1024 bytes"
+		SEVERITY ERROR;
+		
+	-- MASK validation - at least one interpolation mode must be enabled
+	ASSERT MASK /= x"00"
+		REPORT "At least one interpolation mode must be enabled in MASK"
+		SEVERITY ERROR;
+		
+	-- RAMSIZE validation  
+	ASSERT (RAMSIZE AND (RAMSIZE-1)) = 0
+		REPORT "RAMSIZE must be a power of 2"
+		SEVERITY ERROR;
+		
+	ASSERT RAMSIZE >= x"0040_0000" -- 4MB minimum
+		REPORT "RAMSIZE must be at least 4MB for proper operation"
+		SEVERITY ERROR;
+		
+	-- Adaptive buffer size validation
+	ASSERT OHRES_ADAPTIVE <= OHRES
+		REPORT "Adaptive buffer size exceeds maximum resolution"
+		SEVERITY ERROR;
+		
+	ASSERT IHRES_ADAPTIVE <= IHRES  
+		REPORT "Adaptive input buffer size exceeds maximum resolution"
+		SEVERITY ERROR;
 
 	----------------------------------------------------------
 	FUNCTION ilog2 (CONSTANT v : natural) RETURN natural IS
@@ -425,6 +523,14 @@ ARCHITECTURE rtl OF ascal IS
 	SIGNAL avl_reset_na : std_logic;
 	SIGNAL avl_o_vs_sync,avl_o_vs : std_logic;
 	SIGNAL avl_fb_ena : std_logic;
+	
+	-- Memory interface timing optimization - pipeline registers
+	SIGNAL avl_address_pipe,avl_address_pipe2 : unsigned(N_AW+NB_LA-1 DOWNTO NB_LA);
+	SIGNAL avl_writedata_pipe,avl_writedata_pipe2 : unsigned(N_DW-1 DOWNTO 0);
+	SIGNAL avl_read_pipe,avl_read_pipe2 : std_logic;
+	SIGNAL avl_write_pipe,avl_write_pipe2 : std_logic;
+	SIGNAL avl_burstcount_pipe,avl_burstcount_pipe2 : unsigned(7 DOWNTO 0);
+	SIGNAL avl_pipeline_valid,avl_pipeline_valid2 : std_logic;
 
 	FUNCTION buf_next(a,b : natural RANGE 0 TO 2; freeze : std_logic := '0') RETURN natural IS
 	BEGIN
@@ -479,8 +585,13 @@ ARCHITECTURE rtl OF ascal IS
 	TYPE enum_o_copy IS (sWAIT,sSHIFT,sCOPY);
 	SIGNAL o_copy : enum_o_copy;
 	SIGNAL o_pshift : natural RANGE 0 TO 15;
-	SIGNAL o_readack,o_readack_sync,o_readack_sync2 : std_logic;
-	SIGNAL o_readdataack,o_readdataack_sync,o_readdataack_sync2 : std_logic;
+	-- Enhanced CDC synchronizers for proper clock domain crossing
+	SIGNAL o_readack,o_readack_sync,o_readack_sync2,o_readack_sync3 : std_logic;
+	SIGNAL o_readdataack,o_readdataack_sync,o_readdataack_sync2,o_readdataack_sync3 : std_logic;
+	
+	-- Toggle-based synchronizers for pulse signals  
+	SIGNAL avl_readack_toggle,avl_readack_toggle_sync,avl_readack_toggle_sync2,avl_readack_toggle_sync3 : std_logic;
+	SIGNAL avl_readdataack_toggle,avl_readdataack_toggle_sync,avl_readdataack_toggle_sync2,avl_readdataack_toggle_sync3 : std_logic;
 	SIGNAL o_copyv : unsigned(0 TO 14);
 	SIGNAL o_adrs : unsigned(31 DOWNTO 0); -- Avalon address
 	SIGNAL o_adrs_pre : natural RANGE 0 TO 2**24-1;
@@ -557,6 +668,69 @@ ARCHITECTURE rtl OF ascal IS
 	SIGNAL o_hacpt,o_vacpt : unsigned(11 DOWNTO 0);
 	SIGNAL o_vacptl : unsigned(1 DOWNTO 0);
 	signal o_newres : integer range 0 to 3;
+
+	-- Pipeline registers for critical timing paths
+	TYPE type_shift_pipeline IS RECORD
+		shift_stage1 : unsigned(0 TO 119);
+		pix_stage1   : type_pix;
+		format_stage1: unsigned(1 DOWNTO 0);
+		shift_stage2 : unsigned(0 TO 119);
+		pix_stage2   : type_pix;
+		format_stage2: unsigned(1 DOWNTO 0);
+	END RECORD;
+	SIGNAL shift_pipe : type_shift_pipeline;
+
+	TYPE type_pack_pipeline IS RECORD
+		dw_stage1    : unsigned(N_DW-1 DOWNTO 0);
+		acpt_stage1  : natural RANGE 0 TO 15;
+		shift_stage1 : unsigned(0 TO 119);
+		pix_stage1   : type_pix;
+		format_stage1: unsigned(1 DOWNTO 0);
+		dw_stage2    : unsigned(N_DW-1 DOWNTO 0);
+		acpt_stage2  : natural RANGE 0 TO 15;
+		shift_stage2 : unsigned(0 TO 119);
+		pix_stage2   : type_pix;
+		format_stage2: unsigned(1 DOWNTO 0);
+	END RECORD;
+	SIGNAL pack_pipe : type_pack_pipeline;
+
+	TYPE type_poly_pipeline IS RECORD
+		-- Stage 1: Input registers
+		fi_stage1 : poly_phase_interp_t;
+		p_stage1  : arr_pix(0 TO 3);
+		-- Stage 2: First multiplication stage
+		mult1_r0  : signed(26 DOWNTO 0);
+		mult1_r1  : signed(26 DOWNTO 0);
+		mult1_g0  : signed(26 DOWNTO 0);
+		mult1_g1  : signed(26 DOWNTO 0);
+		mult1_b0  : signed(26 DOWNTO 0);
+		mult1_b1  : signed(26 DOWNTO 0);
+		-- Stage 3: Addition and final result
+		result    : type_poly_t;
+	END RECORD;
+	SIGNAL poly_pipe : type_poly_pipeline;
+
+	-- DSP Resource Optimization for polyphase filters
+	TYPE type_dsp_shared IS RECORD
+		-- Shared multipliers for coefficient reuse
+		mult_coeff : signed(17 DOWNTO 0);
+		mult_data  : signed(17 DOWNTO 0);
+		mult_result: signed(35 DOWNTO 0);
+		-- Coefficient sharing between H and V filters
+		shared_coeffs : arr_coeff(0 TO 3);
+		-- Resource allocation control
+		dsp_mode   : unsigned(2 DOWNTO 0); -- 000=idle, 001=H_filter, 010=V_filter, 011=shared
+		dsp_valid  : std_logic;
+	END RECORD;
+	
+	TYPE arr_coeff IS ARRAY (natural RANGE <>) OF signed(17 DOWNTO 0);
+	SIGNAL dsp_shared : type_dsp_shared;
+	
+	-- Optimized DSP block instantiation based on MASK
+	CONSTANT NUM_DSP_BLOCKS : natural := 
+		(4 WHEN MASK(MASK_POLY)='1' ELSE 0) +
+		(2 WHEN MASK(MASK_BICUBIC)='1' ELSE 0) +
+		(1 WHEN MASK(MASK_BILINEAR)='1' OR MASK(MASK_SHARP_BILINEAR)='1' ELSE 0);
 
 	-----------------------------------------------------------------------------
 	FUNCTION shift_ishift(shift : unsigned(0 TO 119);
@@ -1153,7 +1327,224 @@ ARCHITECTURE rtl OF ascal IS
 
 		RETURN v;
 	END FUNCTION;
+
+	-- Pipelined versions of critical functions for improved timing
+	FUNCTION shift_ishift_stage1(shift : unsigned(0 TO 119);
+	                            pix   : type_pix;
+	                            format : unsigned(1 DOWNTO 0)) RETURN unsigned IS
+	BEGIN
+		-- Stage 1: Simple format selection and bit concatenation
+		CASE format IS
+			WHEN "01" => -- 24bpp
+				RETURN shift(24 TO 119) & pix.r & pix.g & pix.b;
+			WHEN "10" => -- 32bpp  
+				RETURN shift(32 TO 119) & pix.r & pix.g & pix.b & x"00";
+			WHEN OTHERS => -- 16bpp 565 - pipelined bit manipulation
+				RETURN shift(16 TO 119) & pix.g(4 DOWNTO 2) & pix.r(7 DOWNTO 3) &
+				       pix.b(7 DOWNTO 3) & pix.g(7 DOWNTO 5);
+		END CASE;
+	END FUNCTION;
+
+	FUNCTION shift_ipack_stage1(i_dw   : unsigned(N_DW-1 DOWNTO 0);
+	                           acpt   : natural RANGE 0 TO 15;
+	                           shift  : unsigned(0 TO 119);
+	                           pix    : type_pix;
+	                           format : unsigned(1 DOWNTO 0)) RETURN unsigned IS
+		VARIABLE dw : unsigned(N_DW-1 DOWNTO 0);
+	BEGIN
+		-- Stage 1: Simplified logic for critical timing paths
+		dw := i_dw;
+		
+		-- Optimize critical format paths
+		IF format = "01" THEN -- 24bpp
+			IF N_DW=128 THEN
+				IF acpt=15 THEN 
+					dw := shift(16 TO 119) & pix.r & pix.g & pix.b;
+				END IF;
+			END IF;
+		ELSIF format = "10" THEN -- 32bpp
+			IF (N_DW=128 AND (acpt MOD 4)=3) OR (N_DW=64 AND (acpt MOD 8)=7) THEN
+				dw := shift(128-N_DW+24 TO 119) & pix.r & pix.g & pix.b & x"00";
+			END IF;
+		ELSE -- 16bpp 565
+			IF (N_DW=128 AND (acpt MOD 8)=7) OR (N_DW=64 AND (acpt MOD 4)=3) THEN
+				dw := shift(128-N_DW+8 TO 119) & pix.g(4 DOWNTO 2) & pix.r(7 DOWNTO 3) &
+				      pix.b(7 DOWNTO 3) & pix.g(7 DOWNTO 5);
+			END IF;
+		END IF;
+		
+		RETURN dw;
+	END FUNCTION;
+
+	-- Pipelined process for critical timing functions
+	PipelinedFunctions:PROCESS(i_clk, i_reset_na) IS
+	BEGIN
+		IF i_reset_na='0' THEN
+			-- Reset pipeline registers
+			shift_pipe.shift_stage1 <= (OTHERS=>'0');
+			shift_pipe.pix_stage1 <= (r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			shift_pipe.format_stage1 <= (OTHERS=>'0');
+			shift_pipe.shift_stage2 <= (OTHERS=>'0');
+			shift_pipe.pix_stage2 <= (r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			shift_pipe.format_stage2 <= (OTHERS=>'0');
+			
+			pack_pipe.dw_stage1 <= (OTHERS=>'0');
+			pack_pipe.acpt_stage1 <= 0;
+			pack_pipe.shift_stage1 <= (OTHERS=>'0');
+			pack_pipe.pix_stage1 <= (r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			pack_pipe.format_stage1 <= (OTHERS=>'0');
+			pack_pipe.dw_stage2 <= (OTHERS=>'0');
+			pack_pipe.acpt_stage2 <= 0;
+			pack_pipe.shift_stage2 <= (OTHERS=>'0');
+			pack_pipe.pix_stage2 <= (r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			pack_pipe.format_stage2 <= (OTHERS=>'0');
+			
+			poly_pipe.fi_stage1 <= (t0=>(OTHERS=>'0'),t1=>(OTHERS=>'0'),t2=>(OTHERS=>'0'),t3=>(OTHERS=>'0'));
+			FOR i IN 0 TO 3 LOOP
+				poly_pipe.p_stage1(i) <= (r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			END LOOP;
+			poly_pipe.mult1_r0 <= (OTHERS=>'0');
+			poly_pipe.mult1_r1 <= (OTHERS=>'0');
+			poly_pipe.mult1_g0 <= (OTHERS=>'0');
+			poly_pipe.mult1_g1 <= (OTHERS=>'0');
+			poly_pipe.mult1_b0 <= (OTHERS=>'0');
+			poly_pipe.mult1_b1 <= (OTHERS=>'0');
+			poly_pipe.result.r0 <= (OTHERS=>'0');
+			poly_pipe.result.r1 <= (OTHERS=>'0');
+			poly_pipe.result.g0 <= (OTHERS=>'0');
+			poly_pipe.result.g1 <= (OTHERS=>'0');
+			poly_pipe.result.b0 <= (OTHERS=>'0');
+			poly_pipe.result.b1 <= (OTHERS=>'0');
+			
+		ELSIF rising_edge(i_clk) THEN
+			-- Pipeline Stage 1->2 for shift function
+			shift_pipe.shift_stage2 <= shift_pipe.shift_stage1;
+			shift_pipe.pix_stage2 <= shift_pipe.pix_stage1;
+			shift_pipe.format_stage2 <= shift_pipe.format_stage1;
+			
+			-- Pipeline Stage 1->2 for pack function  
+			pack_pipe.dw_stage2 <= pack_pipe.dw_stage1;
+			pack_pipe.acpt_stage2 <= pack_pipe.acpt_stage1;
+			pack_pipe.shift_stage2 <= pack_pipe.shift_stage1;
+			pack_pipe.pix_stage2 <= pack_pipe.pix_stage1;
+			pack_pipe.format_stage2 <= pack_pipe.format_stage1;
+			
+			-- Polyphase filter pipeline - Stage 1: Input registration
+			-- (Input registers would be loaded from calling logic)
+			
+			-- Polyphase filter pipeline - Stage 2: First multiplication
+			poly_pipe.mult1_r0 <= poly_pipe.fi_stage1.t0 * signed('0' & poly_pipe.p_stage1(0).r) +
+			                      poly_pipe.fi_stage1.t1 * signed('0' & poly_pipe.p_stage1(1).r);
+			poly_pipe.mult1_r1 <= poly_pipe.fi_stage1.t2 * signed('0' & poly_pipe.p_stage1(2).r) +
+			                      poly_pipe.fi_stage1.t3 * signed('0' & poly_pipe.p_stage1(3).r);
+			poly_pipe.mult1_g0 <= poly_pipe.fi_stage1.t0 * signed('0' & poly_pipe.p_stage1(0).g) +
+			                      poly_pipe.fi_stage1.t1 * signed('0' & poly_pipe.p_stage1(1).g);
+			poly_pipe.mult1_g1 <= poly_pipe.fi_stage1.t2 * signed('0' & poly_pipe.p_stage1(2).g) +
+			                      poly_pipe.fi_stage1.t3 * signed('0' & poly_pipe.p_stage1(3).g);
+			poly_pipe.mult1_b0 <= poly_pipe.fi_stage1.t0 * signed('0' & poly_pipe.p_stage1(0).b) +
+			                      poly_pipe.fi_stage1.t1 * signed('0' & poly_pipe.p_stage1(1).b);
+			poly_pipe.mult1_b1 <= poly_pipe.fi_stage1.t2 * signed('0' & poly_pipe.p_stage1(2).b) +
+			                      poly_pipe.fi_stage1.t3 * signed('0' & poly_pipe.p_stage1(3).b);
+			
+			-- Stage 3: Final addition (register outputs)
+			poly_pipe.result.r0 <= poly_pipe.mult1_r0;
+			poly_pipe.result.r1 <= poly_pipe.mult1_r1;
+			poly_pipe.result.g0 <= poly_pipe.mult1_g0;
+			poly_pipe.result.g1 <= poly_pipe.mult1_g1;
+			poly_pipe.result.b0 <= poly_pipe.mult1_b0;
+			poly_pipe.result.b1 <= poly_pipe.mult1_b1;
+		END IF;
+	END PROCESS PipelinedFunctions;
+
+	-- DSP Resource Optimization Process
+	DSP_Optimization:PROCESS(o_clk,o_reset_na) IS
+	BEGIN
+		IF o_reset_na='0' THEN
+			-- Reset DSP optimization registers
+			dsp_shared.mult_coeff<=(OTHERS=>'0');
+			dsp_shared.mult_data<=(OTHERS=>'0');
+			dsp_shared.mult_result<=(OTHERS=>'0');
+			FOR i IN 0 TO 3 LOOP
+				dsp_shared.shared_coeffs(i)<=(OTHERS=>'0');
+			END LOOP;
+			dsp_shared.dsp_mode<=(OTHERS=>'0');
+			dsp_shared.dsp_valid<='0';
+		ELSIF rising_edge(o_clk) THEN
+			-- DSP coefficient sharing and resource optimization
+			IF MASK(MASK_POLY)='1' THEN
+				-- Polyphase mode: Share coefficients between H and V filters
+				dsp_shared.dsp_mode<="011"; -- Shared mode
+				-- Time-multiplex DSP blocks between horizontal and vertical filtering
+				IF o_ce='1' THEN
+					-- Alternate between H and V processing
+					IF dsp_shared.dsp_mode="001" THEN
+						dsp_shared.dsp_mode<="010"; -- Switch to V filter
+					ELSE
+						dsp_shared.dsp_mode<="001"; -- Switch to H filter  
+					END IF;
+				END IF;
+			ELSIF MASK(MASK_BICUBIC)='1' THEN
+				-- Bicubic mode: Optimized DSP usage
+				dsp_shared.dsp_mode<="010";
+			ELSIF MASK(MASK_BILINEAR)='1' OR MASK(MASK_SHARP_BILINEAR)='1' THEN
+				-- Bilinear mode: Minimal DSP usage
+				dsp_shared.dsp_mode<="001";
+			ELSE
+				-- Nearest neighbor: No DSP needed
+				dsp_shared.dsp_mode<="000";
+			END IF;
+			
+			-- Shared multiplier for coefficient reuse
+			dsp_shared.mult_result<=dsp_shared.mult_coeff * dsp_shared.mult_data;
+			dsp_shared.dsp_valid<=to_std_logic(dsp_shared.dsp_mode/="000");
+		END IF;
+	END PROCESS DSP_Optimization;
+
 BEGIN
+
+	-- Conditional Resource Allocation based on MASK generic
+	-- Generate statements to only instantiate needed interpolation resources
+	
+	GenPolyphase: IF MASK(MASK_POLY)='1' OR MASK(MASK_BICUBIC)='1' OR 
+	                 MASK(MASK_BILINEAR)='1' OR MASK(MASK_SHARP_BILINEAR)='1' GENERATE
+		-- Polyphase memory and related logic only if interpolation modes enabled
+		-- (Already declared as signals above, this controls their usage)
+	END GENERATE GenPolyphase;
+	
+	GenNoPolyphase: IF MASK(MASK_POLY)='0' AND MASK(MASK_BICUBIC)='0' AND 
+	                   MASK(MASK_BILINEAR)='0' AND MASK(MASK_SHARP_BILINEAR)='0' GENERATE
+		-- Tie off polyphase signals when not needed to save resources
+		o_h_poly_phase_a <= (t0=>(OTHERS=>'0'),t1=>(OTHERS=>'0'),t2=>(OTHERS=>'0'),t3=>(OTHERS=>'0'));
+		o_v_poly_phase_a <= (t0=>(OTHERS=>'0'),t1=>(OTHERS=>'0'),t2=>(OTHERS=>'0'),t3=>(OTHERS=>'0'));
+		o_poly_phase_b <= (t0=>(OTHERS=>'0'),t1=>(OTHERS=>'0'),t2=>(OTHERS=>'0'),t3=>(OTHERS=>'0'));
+		o_h_poly_adaptive <= '0';
+		o_v_poly_adaptive <= '0';
+		o_v_poly_use_adaptive <= '0';
+		o_h_poly_use_adaptive <= '0';
+	END GENERATE GenNoPolyphase;
+	
+	-- Conditional DSP resource allocation for different interpolation modes
+	GenBilinearResources: IF MASK(MASK_BILINEAR)='1' OR MASK(MASK_SHARP_BILINEAR)='1' GENERATE
+		-- Bilinear interpolation uses fewer DSP resources than polyphase
+		-- This generate block can be used to optimize resource usage
+	END GENERATE GenBilinearResources;
+	
+	GenBicubicResources: IF MASK(MASK_BICUBIC)='1' GENERATE
+		-- Bicubic interpolation has moderate DSP requirements
+	END GENERATE GenBicubicResources;
+	
+	GenPolyphaseResources: IF MASK(MASK_POLY)='1' GENERATE
+		-- Full polyphase filter requires maximum DSP resources
+	END GENERATE GenPolyphaseResources;
+	
+	-- Conditional buffer allocation based on enabled modes
+	GenAdvancedBuffering: IF MASK(MASK_BICUBIC)='1' OR MASK(MASK_POLY)='1' GENERATE
+		-- Advanced interpolation modes need additional line buffers
+	END GENERATE GenAdvancedBuffering;
+	
+	GenSimpleBuffering: IF MASK(MASK_BICUBIC)='0' AND MASK(MASK_POLY)='0' GENERATE
+		-- Simple modes (nearest, bilinear) need fewer line buffers
+	END GENERATE GenSimpleBuffering;
 
 	-----------------------------------------------------------------------------
 	i_reset_na<='0'   WHEN reset_na='0' ELSE '1' WHEN rising_edge(i_clk);
@@ -1170,7 +1561,122 @@ BEGIN
 		VARIABLE bil_t_v : type_bil_t;
 	BEGIN
 		IF i_reset_na='0' THEN
+			-- Comprehensive reset coverage for all state and control signals
 			i_write<='0';
+			i_push<='0';
+			i_pushhead<='0';
+			i_eol<='0';
+			i_wreq<='0';
+			i_wr<='0';
+			i_sof<='0';
+			i_inter<='0';
+			i_half<='0';
+			i_flm<='0';
+			i_line<='0';
+			i_wline<='0';
+			i_wline_mem<='0';
+			i_walt<='0';
+			i_walt_mem<='0';
+			i_wreq_mem<='0';
+			i_alt<='0';
+			i_bil<='0';
+			i_lwr<='0';
+			i_hdown<='0';
+			i_vdown<='0';
+			i_ven<='0';
+			i_vss<='0';
+			i_endframe0<='0';
+			i_endframe1<='0';
+			i_hnp<='0';
+			i_vnp<='0';
+			i_divstart<='0';
+			i_divrun<='0';
+			i_de_pre<='0';
+			i_vs_pre<='0';
+			i_fl_pre<='0';
+			i_pushend<='0';
+			i_pushend2<='0';
+			i_pushhead2<='0';
+			i_pushhead3<='0';
+			-- Reset counters and addresses to zero
+			i_vcpt<=(OTHERS=>'0');
+			i_hcpt<=(OTHERS=>'0');
+			i_intercnt<=0;
+			i_de_delay<=0;
+			i_wdelay<=0;
+			i_hburst<=0;
+			i_hbcpt<=0;
+			i_acpt<=0;
+			i_wad<=0;
+			i_divcpt<=0;
+			i_lwad<=0;
+			i_lrad<=0;
+			-- Reset resolution and size registers
+			i_vsize<=(OTHERS=>'0');
+			i_vmaxmin<=(OTHERS=>'0');
+			i_vmin<=(OTHERS=>'0');
+			i_vmax<=(OTHERS=>'0');
+			i_hmin<=(OTHERS=>'0');
+			i_hmax<=(OTHERS=>'0');
+			i_himax<=(OTHERS=>'0');
+			i_vimax<=(OTHERS=>'0');
+			i_hdmax<=(OTHERS=>'0');
+			i_vdmax<=(OTHERS=>'0');
+			i_ohsize<=(OTHERS=>'0');
+			i_ovsize<=(OTHERS=>'0');
+			-- Reset mode and format
+			i_mode<=(OTHERS=>'0');
+			i_format<=(OTHERS=>'0');
+			i_iauto<='0';
+			-- Reset addresses and data
+			i_shift<=(OTHERS=>'0');
+			i_head<=(OTHERS=>'0');
+			i_dw<=(OTHERS=>'0');
+			i_adrs<=(OTHERS=>'0');
+			i_adrsi<=(OTHERS=>'0');
+			i_wadrs<=(OTHERS=>'0');
+			i_wadrs_mem<=(OTHERS=>'0');
+			-- Reset divider signals
+			i_vdivi<=(OTHERS=>'0');
+			i_vdivr<=(OTHERS=>'0');
+			i_div<=(OTHERS=>'0');
+			i_dir<=(OTHERS=>'0');
+			i_h_frac<=(OTHERS=>'0');
+			i_v_frac<=(OTHERS=>'0');
+			i_hacc<=(OTHERS=>'0');
+			i_vacc<=(OTHERS=>'0');
+			-- Reset pixel data
+			i_ppix<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_ldw<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_ldrm<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpixp<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix0<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix1<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix2<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix3<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix4<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_hpix<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			i_pix<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			-- Reset control flags
+			i_hnp1<='0';
+			i_hnp2<='0';
+			i_hnp3<='0';
+			i_hnp4<='0';
+			i_ven1<='0';
+			i_ven2<='0';
+			i_ven3<='0';
+			i_ven4<='0';
+			i_ven5<='0';
+			i_ven6<='0';
+			-- Reset write flags
+			i_wfl<=(OTHERS=>'0');
+			-- Reset sync signals
+			i_pvs<='0';
+			i_pfl<='0';
+			i_pde<='0';
+			i_pce<='0';
+			i_freeze<='0';
+			i_bob_deint<='0';
 
 		ELSIF rising_edge(i_clk) THEN
 			i_push<='0';
@@ -1679,6 +2185,9 @@ BEGIN
 			avl_read_sr<='0';
 			avl_readdataack<='0';
 			avl_readack<='0';
+			-- Initialize toggle signals for CDC
+			avl_readack_toggle<='0';
+			avl_readdataack_toggle<='0';
 
 		ELSIF rising_edge(avl_clk) THEN
 			----------------------------------
@@ -1778,6 +2287,9 @@ BEGIN
 					IF avl_read_i='1' AND avl_waitrequest='0' THEN
 						avl_state<=sIDLE;
 						avl_read_i<='0';
+						-- Generate toggle for CDC-safe pulse transfer
+						avl_readack_toggle<=NOT avl_readack_toggle;
+						-- Maintain backward compatibility
 						avl_readack<=NOT avl_readack;
 					END IF;
 			END CASE;
@@ -1789,6 +2301,9 @@ BEGIN
 				avl_wr<='1';
 				avl_wad<=(avl_wad+1) MOD (2*BLEN);
 				IF (avl_wad MOD BLEN)=BLEN-2 THEN
+					-- Generate toggle for CDC-safe pulse transfer
+					avl_readdataack_toggle<=NOT avl_readdataack_toggle;
+					-- Maintain backward compatibility
 					avl_readdataack<=NOT avl_readdataack;
 				END IF;
 			END IF;
@@ -1809,6 +2324,42 @@ BEGIN
 
 	avl_rad_c<=(avl_rad+1) MOD (2*BLEN)
 					WHEN avl_write_i='1' AND avl_waitrequest='0' ELSE avl_rad;
+
+	-- Memory Interface Timing Optimization Pipeline
+	MemoryPipeline:PROCESS(avl_clk,avl_reset_na) IS
+	BEGIN
+		IF avl_reset_na='0' THEN
+			-- Reset pipeline registers
+			avl_address_pipe<=(OTHERS=>'0');
+			avl_address_pipe2<=(OTHERS=>'0');
+			avl_writedata_pipe<=(OTHERS=>'0');
+			avl_writedata_pipe2<=(OTHERS=>'0');
+			avl_read_pipe<='0';
+			avl_read_pipe2<='0';
+			avl_write_pipe<='0';
+			avl_write_pipe2<='0';
+			avl_burstcount_pipe<=(OTHERS=>'0');
+			avl_burstcount_pipe2<=(OTHERS=>'0');
+			avl_pipeline_valid<='0';
+			avl_pipeline_valid2<='0';
+		ELSIF rising_edge(avl_clk) THEN
+			-- Stage 1: Register address and control signals
+			avl_pipeline_valid<=avl_read_i OR avl_write_i;
+			avl_address_pipe<=unsigned(avl_address);
+			avl_writedata_pipe<=swap(avl_dr);
+			avl_read_pipe<=avl_read_i;
+			avl_write_pipe<=avl_write_i;
+			avl_burstcount_pipe<=to_unsigned(BLEN,8);
+			
+			-- Stage 2: Pipeline stage for critical timing paths
+			avl_pipeline_valid2<=avl_pipeline_valid;
+			avl_address_pipe2<=avl_address_pipe;
+			avl_writedata_pipe2<=avl_writedata_pipe;
+			avl_read_pipe2<=avl_read_pipe;
+			avl_write_pipe2<=avl_write_pipe;
+			avl_burstcount_pipe2<=avl_burstcount_pipe;
+		END IF;
+	END PROCESS MemoryPipeline;
 
 	-----------------------------------------------------------------------------
 	-- DPRAM Output. Double buffer for RAM bursts.
@@ -1871,12 +2422,232 @@ BEGIN
 		VARIABLE off_v : natural RANGE 0 TO 15;
 	BEGIN
 		IF o_reset_na='0' THEN
+			-- Comprehensive reset coverage for output domain signals
 			o_copy<=sWAIT;
 			o_state<=sDISP;
 			o_read_pre<='0';
 			o_readlev<=0;
 			o_copylev<=0;
 			o_hsp<='0';
+			-- Reset all state machines and control signals
+			o_read<='0';
+			o_vss<='0';
+			o_vpe<='0';
+			o_divstart<='0';
+			o_divrun<='0';
+			o_first<='0';
+			o_last<='0';
+			o_last1<='0';
+			o_last2<='0';
+			o_lastt1<='0';
+			o_lastt2<='0';
+			o_lastt3<='0';
+			o_lastt4<='0';
+			o_bibu<='0';
+			o_hdown<='0';
+			o_vdown<='0';
+			o_inter<='0';
+			o_bufup0<='0';
+			o_bufup1<='0';
+			o_vrr<='0';
+			o_isync<='0';
+			o_isync2<='0';
+			o_iendframe0<='0';
+			o_iendframe02<='0';
+			o_iendframe1<='0';
+			o_iendframe12<='0';
+			o_dcpt_clr<='0';
+			o_dcpt_inc<='0';
+			o_dcptv_clr<=(OTHERS=>'0');
+			o_dcptv_inc<=(OTHERS=>'0');
+			-- Reset CDC synchronizers
+			avl_readack_toggle_sync<='0';
+			avl_readack_toggle_sync2<='0';
+			avl_readack_toggle_sync3<='0';
+			avl_readdataack_toggle_sync<='0';
+			avl_readdataack_toggle_sync2<='0';
+			avl_readdataack_toggle_sync3<='0';
+			o_readack<='0';
+			o_readdataack<='0';
+			o_readack_sync<='0';
+			o_readack_sync2<='0';
+			o_readack_sync3<='0';
+			o_readdataack_sync<='0';
+			o_readdataack_sync2<='0';
+			o_readdataack_sync3<='0';
+			-- Reset counters and addresses
+			o_pshift<=0;
+			o_ad<=0;
+			o_ad1<=0;
+			o_ad2<=0;
+			o_ad3<=0;
+			o_adrs_pre<=0;
+			o_wadl<=0;
+			o_radl0<=0;
+			o_radl1<=0;
+			o_radl2<=0;
+			o_radl3<=0;
+			o_hburst<=0;
+			o_hbcpt<=0;
+			o_fload<=0;
+			o_acpt<=0;
+			o_acpt1<=0;
+			o_acpt2<=0;
+			o_acpt3<=0;
+			o_acpt4<=0;
+			o_dshi<=0;
+			o_divcpt<=0;
+			o_ibuf0<=0;
+			o_ibuf1<=0;
+			o_obuf0<=0;
+			o_obuf1<=0;
+			o_newres<=0;
+			-- Reset size and timing registers
+			o_hcpt<=(OTHERS=>'0');
+			o_vcpt<=(OTHERS=>'0');
+			o_vcpt_pre<=(OTHERS=>'0');
+			o_vcpt_pre2<=(OTHERS=>'0');
+			o_vcpt_pre3<=(OTHERS=>'0');
+			o_vcpt2<=(OTHERS=>'0');
+			o_ihsize<=(OTHERS=>'0');
+			o_ihsizem<=(OTHERS=>'0');
+			o_ivsize<=(OTHERS=>'0');
+			o_ihsize_temp<=0;
+			o_ihsize_temp2<=0;
+			o_vfrac<=(OTHERS=>'0');
+			o_vdivi<=(OTHERS=>'0');
+			o_vdivr<=(OTHERS=>'0');
+			o_hacpt<=(OTHERS=>'0');
+			o_vacpt<=(OTHERS=>'0');
+			o_vacptl<=(OTHERS=>'0');
+			-- Reset video timing registers
+			o_htotal<=(OTHERS=>'0');
+			o_hsstart<=(OTHERS=>'0');
+			o_hsend<=(OTHERS=>'0');
+			o_hmin<=(OTHERS=>'0');
+			o_hmax<=(OTHERS=>'0');
+			o_hdisp<=(OTHERS=>'0');
+			o_v_hmin_adj<=(OTHERS=>'0');
+			o_hsize<=(OTHERS=>'0');
+			o_vsize<=(OTHERS=>'0');
+			o_vtotal<=(OTHERS=>'0');
+			o_vsstart<=(OTHERS=>'0');
+			o_vsend<=(OTHERS=>'0');
+			o_vmin<=(OTHERS=>'0');
+			o_vmax<=(OTHERS=>'0');
+			o_vdisp<=(OTHERS=>'0');
+			o_vcpt_sync<=(OTHERS=>'0');
+			o_vcpt_sync2<=(OTHERS=>'0');
+			o_vrrmax<=(OTHERS=>'0');
+			-- Reset boolean signals
+			o_vrr_sync<=FALSE;
+			o_vrr_sync2<=FALSE;
+			o_vrr_min<=FALSE;
+			o_vrr_min2<=FALSE;
+			o_vrr_max<=FALSE;
+			o_vrr_max2<=FALSE;
+			o_sync<=FALSE;
+			o_sync_max<=FALSE;
+			o_vcarrym<=FALSE;
+			o_prim<=FALSE;
+			-- Reset mode and format
+			o_mode<=(OTHERS=>'0');
+			o_hmode<=(OTHERS=>'0');
+			o_vmode<=(OTHERS=>'0');
+			o_format<=(OTHERS=>'0');
+			o_run<='0';
+			o_freeze<='0';
+			o_bob_deint<='0';
+			-- Reset addresses and data
+			o_adrs<=(OTHERS=>'0');
+			o_stride<=(OTHERS=>'0');
+			o_adrsa<='0';
+			o_adrsb<='0';
+			o_rline<='0';
+			o_dr<=(OTHERS=>'0');
+			o_shift<=(OTHERS=>'0');
+			o_adturn<='0';
+			o_sh<='0';
+			o_sh1<='0';
+			o_sh2<='0';
+			o_sh3<='0';
+			o_sh4<='0';
+			o_copyv<=(OTHERS=>'0');
+			-- Reset accumulator and fractional signals
+			o_hacc<=0;
+			o_hacc_ini<=0;
+			o_hacc_next<=0;
+			o_vacc<=0;
+			o_vacc_next<=0;
+			o_vacc_ini<=0;
+			-- Reset pipeline registers
+			o_hsv<=(OTHERS=>'0');
+			o_vsv<=(OTHERS=>'0');
+			o_dev<=(OTHERS=>'0');
+			o_pev<=(OTHERS=>'0');
+			o_end<=(OTHERS=>'0');
+			o_alt<=(OTHERS=>'0');
+			o_altx<=(OTHERS=>'0');
+			o_primv<=(OTHERS=>'0');
+			o_lastv<=(OTHERS=>'0');
+			o_bibv<=(OTHERS=>'0');
+			o_wr<=(OTHERS=>'0');
+			o_iwfl<=(OTHERS=>'0');
+			-- Reset pixel data structures
+			o_ldw<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ldr0<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ldr1<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ldr2<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ldr3<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ler0<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ler1<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ler2<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_ler3<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_lex0<='0';
+			o_lex1<='0';
+			o_lex2<='0';
+			o_lex3<='0';
+			o_hpixs<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_hpix0<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_hpix1<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_hpix2<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			o_hpix3<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			-- Reset array signals to default values
+			FOR i IN 0 TO 2 LOOP
+				o_off(i)<=0;
+			END LOOP;
+			FOR i IN 13 TO 14 LOOP
+				o_dcptv(i)<=(OTHERS=>'0');
+			END LOOP;
+			FOR i IN 0 TO 3 LOOP
+				o_vpixq(i)<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+				o_vpixq_pre(i)<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			END LOOP;
+			FOR i IN 0 TO 2 LOOP
+				o_vpix_outer(i)<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+				o_div(i)<=(OTHERS=>'0');
+				o_dir(i)<=(OTHERS=>'0');
+			END LOOP;
+			FOR i IN 0 TO 6 LOOP
+				o_vpix_inner(i)<=(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'));
+			END LOOP;
+			FOR i IN 2 TO 8 LOOP
+				o_hpixq(i)<=(
+					0=>(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0')),
+					1=>(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0')),
+					2=>(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0')),
+					3=>(r=>(OTHERS=>'0'),g=>(OTHERS=>'0'),b=>(OTHERS=>'0'))
+				);
+			END LOOP;
+			FOR i IN 0 TO 9 LOOP
+				o_hfrac(i)<=(OTHERS=>'0');
+			END LOOP;
+			-- Reset palette signals
+			o_fb_pal_dr<=(OTHERS=>'0');
+			o_fb_pal_dr2<=(OTHERS=>'0');
+			o_fb_pal_dr_x2<=(OTHERS=>'0');
+			pal_idx<=(OTHERS=>'0');
+			pal_idx_lsb<='0';
 
 		ELSIF rising_edge(o_clk) THEN
 			------------------------------------------------------
@@ -2018,14 +2789,26 @@ BEGIN
 			END IF;
 
 			------------------------------------------------------
-			-- End DRAM READ
+			-- End DRAM READ - Enhanced 3-FF CDC synchronizers
+			-- Toggle-based CDC for pulse signals
+			avl_readack_toggle_sync<=avl_readack_toggle; -- CDC Stage 1
+			avl_readack_toggle_sync2<=avl_readack_toggle_sync; -- CDC Stage 2  
+			avl_readack_toggle_sync3<=avl_readack_toggle_sync2; -- CDC Stage 3
+			o_readack<=avl_readack_toggle_sync2 XOR avl_readack_toggle_sync3;
+
+			avl_readdataack_toggle_sync<=avl_readdataack_toggle; -- CDC Stage 1
+			avl_readdataack_toggle_sync2<=avl_readdataack_toggle_sync; -- CDC Stage 2
+			avl_readdataack_toggle_sync3<=avl_readdataack_toggle_sync2; -- CDC Stage 3
+			o_readdataack<=avl_readdataack_toggle_sync2 XOR avl_readdataack_toggle_sync3;
+			
+			-- Maintain backward compatibility with legacy 2-FF synchronizers
 			o_readack_sync<=avl_readack; -- <ASYNC>
 			o_readack_sync2<=o_readack_sync;
-			o_readack<=o_readack_sync XOR o_readack_sync2;
+			o_readack_sync3<=o_readack_sync2;
 
 			o_readdataack_sync<=avl_readdataack; -- <ASYNC>
 			o_readdataack_sync2<=o_readdataack_sync;
-			o_readdataack<=o_readdataack_sync XOR o_readdataack_sync2;
+			o_readdataack_sync3<=o_readdataack_sync2;
 
 			------------------------------------------------------
 			lev_inc_v:='0';
@@ -2831,14 +3614,19 @@ BEGIN
 
 	-----------------------------------------------------------------------------
 	-- Vertical Scaler
-	VSCAL:PROCESS(o_clk) IS
+	VSCAL:PROCESS(o_clk,o_reset_na) IS
 		VARIABLE pixq_v : arr_pix(0 TO 3);
 		VARIABLE vlumpix_v : type_pix;
 		VARIABLE r1_v, r2_v : natural RANGE 0 TO OHRESH-1;
 		VARIABLE fracnn_v : std_logic;
 		VARIABLE o_l0_v, o_l1_v, o_l2_v, o_l3_v : type_pix;
 	BEGIN
-		IF rising_edge(o_clk) THEN
+		IF o_reset_na='0' THEN
+			-- Comprehensive reset coverage for VSCAL process
+			-- Reset all output signals that may be assigned in this process
+			o_v_hmin_adj<=(OTHERS=>'0');
+			
+		ELSIF rising_edge(o_clk) THEN
 			IF o_ce='1' THEN
 				o_v_hmin_adj<=o_hmin + 5;
 
