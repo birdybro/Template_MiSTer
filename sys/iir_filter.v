@@ -162,7 +162,7 @@ module iir_filter_tap
 	output [39:0] tap
 );
 
-wire signed [60:0] y_mul = $signed(y[36:0]) * $signed(cy);
+wire signed [63:0] y_mul = $signed(y) * $signed({{8{cy[23]}}, cy});
 
 function [39:0] x_mul;
 	input [39:0] x;
@@ -178,7 +178,7 @@ endfunction
 (* ramstyle = "logic" *) reg [39:0] intreg[2];
 always @(posedge clk, posedge reset) begin
 	if(reset) {intreg[0],intreg[1]} <= 80'd0;
-	else if(ce) intreg[ch] <= x_mul(x) - y_mul[60:21] + z;
+	else if(ce) intreg[ch] <= x_mul(x) - y_mul[63:24] + z;
 end
 
 assign tap = intreg[ch];
