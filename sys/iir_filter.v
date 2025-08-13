@@ -198,14 +198,24 @@ module DC_blocker
 );
 
 wire [39:0] x  = {din[15], din, 23'd0};
-wire [39:0] x0 = x - (sample_rate ? {{11{x[39]}}, x[39:11]} : {{10{x[39]}}, x[39:10]});
-wire [39:0] y1 = y - (sample_rate ? {{10{y[39]}}, y[39:10]} : {{09{y[39]}}, y[39:09]});
+wire [39:0] x0 = x - (sample_rate ? (x >>> 11) : (x >>> 10));
+wire [39:0] y1 = y - (sample_rate ? (y >>> 11) : (y >>> 10));
 wire [39:0] y0 = x0 - x1 + y1;
 
-reg  [39:0] x1, y;
-always @(posedge clk) if(ce) begin
-	x1 <= x0;
-	y  <= ^y0[39:38] ? {{2{y0[39]}},{38{y0[38]}}} : y0;
+reg [39:0] y_clamped;
+always @* begin
+    if (^y0[39:38]) begin
+        y_clamped = y0[39] ? {1'b1, {39{1'b0}}}
+		                   : {1'b0, {39{1'b1}}};
+    end else begin
+        y_clamped = y0;
+    end
+end
+
+reg [39:0] x1, y;
+always @(posedge clk) if (ce) begin
+    x1 <= x0;
+    y  <= y_clamped;
 end
 
 assign dout = mute ? 16'd0 : y[38:23];
