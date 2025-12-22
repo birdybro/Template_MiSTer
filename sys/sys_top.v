@@ -1547,11 +1547,22 @@ end
 assign SDCD_SPDIF = (mcp_en & ~spdif) ? 1'b0 : 1'bZ;
 
 `ifndef MISTER_DUAL_SDRAM
+
+	reg [15:0] audio_mute_cnt = 0;
+	wire       audio_unmute   = &audio_mute_cnt; // goes high after ~2.7 ms @24.576 MHz
+
+	always @(posedge clk_audio or posedge reset) begin
+	if (reset)
+		audio_mute_cnt <= 0;
+	else if (!audio_unmute)
+		audio_mute_cnt <= audio_mute_cnt + 1'b1;
+	end
+
 	wire analog_l, analog_r;
 
 	assign AUDIO_SPDIF = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_LRCLK : spdif;
-	assign AUDIO_R     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_I2S   : analog_r;
-	assign AUDIO_L     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_SCLK  : analog_l;
+	assign AUDIO_R     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_I2S   : audio_unmute ? analog_r : 1'b0;
+	assign AUDIO_L     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_SCLK  : audio_unmute ? analog_l : 1'b0;
 `endif
 
 assign HDMI_MCLK = clk_audio;
