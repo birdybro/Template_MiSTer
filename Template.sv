@@ -180,7 +180,7 @@ assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;  
+assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
 
 assign VGA_SL = 0;
 assign VGA_F1 = 0;
@@ -229,6 +229,7 @@ localparam CONF_STR = {
 	"P2S0,DSK;",
 	"P2O[7:6],Option 2,1,2,3,4;",
 	"-;",
+	"O[8],Autosave,On,Off;",
 	"-;",
 	"T[0],Reset;",
 	"R[0],Reset and close OSD;",
@@ -242,6 +243,19 @@ wire forced_scandoubler;
 wire   [1:0] buttons;
 wire [127:0] status;
 wire  [10:0] ps2_key;
+wire  [31:0] joystick_0;
+
+// ioctl signals for save upload (FPGA → HPS → SD card)
+wire        ioctl_upload;
+wire        ioctl_upload_req;
+wire        ioctl_rd;
+wire  [7:0] ioctl_din;
+wire        ioctl_download;
+wire [15:0] ioctl_index;
+wire        ioctl_wr;
+wire [26:0] ioctl_addr;
+wire  [7:0] ioctl_dout;
+wire        ioctl_wait;
 
 hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
@@ -255,8 +269,77 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.buttons(buttons),
 	.status(status),
 	.status_menumask({status[5]}),
-	
-	.ps2_key(ps2_key)
+
+	.ps2_key(ps2_key),
+
+	.joystick_0(joystick_0),
+
+	// Save upload interface — driven by autosave module
+	.ioctl_upload(ioctl_upload),
+	.ioctl_upload_req(ioctl_upload_req),
+	.ioctl_upload_index(8'd0),  // save file index — adjust per core
+	.ioctl_din(ioctl_din),
+	.ioctl_rd(ioctl_rd),
+
+	// Download interface (ROM/save loading)
+	.ioctl_download(ioctl_download),
+	.ioctl_index(ioctl_index),
+	.ioctl_wr(ioctl_wr),
+	.ioctl_addr(ioctl_addr),
+	.ioctl_dout(ioctl_dout),
+	.ioctl_wait(ioctl_wait)
+);
+
+///////////////////////   AUTOSAVE   /////////////////////////////////
+
+// TODO: Connect to your core's save RAM write strobe.
+wire save_ram_wr = 1'b0;
+
+// TODO: Connect to your core's save memory read port.
+localparam SAVE_ADDR_W = 13;           // e.g. 13 for 8KB — adjust per core
+localparam SAVE_DATA_W = 8;            // 8 for normal hps_io, 16 for WIDE
+wire [SAVE_ADDR_W-1:0] save_addr;
+wire        save_rd;
+wire [SAVE_DATA_W-1:0] save_data = '0; // wire to your memory's read data output
+wire        save_valid = 1'b1; // for SDRAM/DDR3, wire to data-ready signal
+wire        saving;            // high during save upload — use for OSD icon
+
+// PRESCALE=50000 → 1 tick = 1ms at 50 MHz. Adjust for your core's clock.
+autosave #(
+	.SIMPLE(0),
+	.PRESCALE(50_000),     // 50 MHz / 50000 = 1 ms per tick
+	.MIN_TICKS(1_000),     // 1 second
+	.MAX_TICKS(30_000),    // 30 seconds
+	.ADDR_W(SAVE_ADDR_W),
+	.DATA_W(SAVE_DATA_W)
+) autosave_inst
+(
+	.clk_sys(clk_sys),
+	.reset(reset),
+	.enable(~status[8]),        // OSD: Autosave On/Off
+
+	.save_ram_wr(save_ram_wr),
+	.user_active(|joystick_0 | ps2_key[10]),
+
+	// Trigger interface (SIMPLE=1 mode — unused here)
+	.save_trigger(),           // unconnected in SIMPLE=0
+	.save_busy(1'b0),          // not used in SIMPLE=0
+
+	// Save memory read port (SIMPLE=0 mode)
+	.save_addr(save_addr),
+	.save_rd(save_rd),
+	.save_data(save_data),
+	.save_valid(save_valid),
+
+	// hps_io interface (SIMPLE=0 mode)
+	.ioctl_upload(ioctl_upload),
+	.ioctl_upload_req(ioctl_upload_req),
+	.ioctl_rd(ioctl_rd),
+	.ioctl_din(ioctl_din),
+	.core_wait(1'b0),          // OR with core's download wait if applicable
+	.ioctl_wait(ioctl_wait),
+
+	.saving(saving)
 );
 
 ///////////////////////   CLOCKS   ///////////////////////////////
