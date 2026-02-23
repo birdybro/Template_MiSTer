@@ -114,32 +114,47 @@ iir_filter_tap iir_tap_2
 wire [15:0] y_clamp = (~y[39] & |y[38:35]) ? 16'h7FFF : (y[39] & ~&y[38:35]) ? 16'h8000 : y[35:20];
 
 reg        ch = 0;
-reg [15:0] out_l, out_r, out_m;
+reg [15:0] out_m;
 reg [15:0] inp, inp_m;
 always @(posedge clk) if (ce) begin
-	if(!stereo) begin
-		ch    <= 0;
-		inp   <= input_l;
-		out_l <= y_clamp;
-		out_r <= y_clamp;
-	end
-	else begin
-		ch <= ~ch;
-		if(ch) begin
-			out_m <= y_clamp;
-			inp   <= inp_m;
-		end
-		else begin
-			out_l <= out_m;
-			out_r <= y_clamp;
-			inp   <= input_l;
-			inp_m <= input_r;
-		end
-	end
+    if (!stereo) begin
+        ch  <= 0;
+        inp <= input_l;
+    end
+    else begin
+        ch <= ~ch;
+        if (ch) begin
+            out_m <= y_clamp;
+            inp   <= inp_m;
+        end
+        else begin
+            inp   <= input_l;
+            inp_m <= input_r;
+        end
+    end
 end
 
 reg [31:0] out;
-always @(posedge clk) if (sample_ce) out <= {out_l, out_r};
+reg        sample_req;
+
+always @(posedge clk or posedge reset) begin
+	if (reset) begin
+		out        <= 32'd0;
+		sample_req <= 1'b0;
+	end else begin
+		if (sample_ce) sample_req <= 1'b1;
+		
+		if (ce && sample_req) begin
+			if (!stereo) begin
+				out        <= {y_clamp, y_clamp};
+				sample_req <= 1'b0;
+			end else if (!ch) begin
+				out        <= {out_m, y_clamp};
+				sample_req <= 1'b0;
+			end
+		end
+	end
+end
 
 assign {output_l, output_r} = out;
 
