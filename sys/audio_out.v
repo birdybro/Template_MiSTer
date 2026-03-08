@@ -6,6 +6,7 @@ module audio_out
 (
 	input        reset,
 	input        clk,
+	input        clk_core,
 
 	//0 - 48KHz, 1 - 96KHz
 	input        sample_rate,
@@ -140,16 +141,45 @@ always @(posedge clk) begin
 	end
 end
 
-reg [15:0] cl,cr;
+// CDC: async FIFO from clk_core to clk_audio
+reg [31:0] core_prev;
+reg        core_wr;
+always @(posedge clk_core) begin
+	core_prev <= {core_l, core_r};
+	core_wr   <= ({core_l, core_r} != core_prev);
+end
+
+wire [31:0] fifo_rd_data;
+wire        fifo_empty;
+wire        fifo_full;
+wire        fifo_rd_en = sample_ce & ~fifo_empty;
+
+audio_cdc_fifo #(
+	.DATA_WIDTH(32),
+	.ADDR_WIDTH(2)
+) audio_fifo (
+	.wr_clk  (clk_core),
+	.wr_rst  (reset),
+	.wr_en   (core_wr & ~fifo_full),
+	.wr_data (core_prev),
+	.wr_full (fifo_full),
+
+	.rd_clk  (clk),
+	.rd_rst  (reset),
+	.rd_en   (fifo_rd_en),
+	.rd_data (fifo_rd_data),
+	.rd_empty(fifo_empty)
+);
+
+reg [15:0] cl, cr;
 always @(posedge clk) begin
-	reg [15:0] cl1,cl2;
-	reg [15:0] cr1,cr2;
-
-	cl1 <= core_l; cl2 <= cl1;
-	if(cl2 == cl1) cl <= cl2;
-
-	cr1 <= core_r; cr2 <= cr1;
-	if(cr2 == cr1) cr <= cr2;
+	if (reset) begin
+		cl <= 16'd0;
+		cr <= 16'd0;
+	end else if (fifo_rd_en) begin
+		cl <= fifo_rd_data[31:16];
+		cr <= fifo_rd_data[15:0];
+	end
 end
 
 reg a_en1 = 0, a_en2 = 0;
