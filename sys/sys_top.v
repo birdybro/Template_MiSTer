@@ -996,14 +996,24 @@ always @(posedge clk_vid) begin
 end
 
 `ifndef MISTER_DEBUG_NOHDMI
+	// CDC: 2-FF sync for lowlat and cfg_done (clk_sys -> FPGA_CLK1_50)
+	reg lowlat_50, cfg_done_50;
+	always @(posedge FPGA_CLK1_50) begin
+		reg lowlat_d1, cfg_done_d1;
+		lowlat_d1   <= lowlat;
+		lowlat_50   <= lowlat_d1;
+		cfg_done_d1 <= cfg_done;
+		cfg_done_50 <= cfg_done_d1;
+	end
+
 	wire [15:0] lltune;
 	pll_hdmi_adj pll_hdmi_adj
 	(
 		.clk(FPGA_CLK1_50),
 		.reset_na(~reset_req),
 
-		.llena(lowlat),
-		.lltune({16{cfg_done}} & lltune),
+		.llena(lowlat_50),
+		.lltune({16{cfg_done_50}} & lltune),
 		.locked(led_locked),
 		.i_waitrequest(adj_waitrequest),
 		.i_write(adj_write),
@@ -1180,11 +1190,18 @@ cyclonev_hps_interface_peripheral_i2c hdmi_i2c
 
 `ifndef MISTER_DEBUG_NOHDMI
 	`ifdef MISTER_FB
+	// CDC: 2-FF sync for fb_force_blank and LFB_EN into clk_hdmi
 	reg dis_output;
 	always @(posedge clk_hdmi) begin
-		reg dis;
-		dis <= fb_force_blank & ~LFB_EN;
-		dis_output <= dis;
+		reg fb_blank_d1, fb_blank_d2;
+		reg lfb_en_d1, lfb_en_d2;
+
+		fb_blank_d1 <= fb_force_blank;
+		fb_blank_d2 <= fb_blank_d1;
+		lfb_en_d1   <= LFB_EN;
+		lfb_en_d2   <= lfb_en_d1;
+
+		dis_output <= fb_blank_d2 & ~lfb_en_d2;
 	end
 	`else
 	wire dis_output = 0;
