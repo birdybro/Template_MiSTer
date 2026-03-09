@@ -42,14 +42,21 @@ module alsa
 );
 
 reg [60:0] buf_info;
+reg        buf_info_wr = 0;
 reg  [6:0] spicnt = 0;
 always @(posedge spi_sck, posedge spi_ss) begin
 	reg [95:0] spi_data;
 
-	if(spi_ss) spicnt <= 0;
-	else begin
+	if(spi_ss) begin
+		spicnt <= 0;
+		buf_info_wr <= 0;
+	end else begin
 		spi_data[{spicnt[6:3],~spicnt[2:0]}] <= spi_mosi;
-		if(&spicnt) buf_info <= {spi_data[82:67],spi_data[50:35],spi_data[31:3]};
+		buf_info_wr <= 0;
+		if(&spicnt) begin
+			buf_info <= {spi_data[82:67],spi_data[50:35],spi_data[31:3]};
+			buf_info_wr <= 1;
+		end
 		spicnt <= spicnt + 1'd1;
 	end
 end
@@ -60,16 +67,41 @@ reg [31:0] spi_out = 0;
 always @(posedge clk) if(spi_ss) spi_out <= {buf_rptr, hurryup, 8'h00};
 
 
+// CDC: async FIFO from spi_sck to clk
+wire [60:0] fifo_rd_data;
+wire        fifo_empty;
+wire        fifo_full;
+wire        fifo_rd_en = ~fifo_empty;
+
+async_fifo #(
+	.DATA_WIDTH(61),
+	.ADDR_WIDTH(2)
+) buf_info_fifo (
+	.wr_clk  (spi_sck),
+	.wr_rst  (spi_ss),
+	.wr_en   (buf_info_wr & ~fifo_full),
+	.wr_data (buf_info),
+	.wr_full (fifo_full),
+
+	.rd_clk  (clk),
+	.rd_rst  (reset),
+	.rd_en   (fifo_rd_en),
+	.rd_data (fifo_rd_data),
+	.rd_empty(fifo_empty)
+);
+
 reg [31:3] buf_addr;
 reg [18:3] buf_len;
 reg [18:3] buf_wptr = 0;
 
 always @(posedge clk) begin
-	reg [60:0] data1,data2;
-
-	data1 <= buf_info;
-	data2 <= data1;
-	if(data2 == data1) {buf_wptr,buf_len,buf_addr} <= data2;
+	if (reset) begin
+		buf_wptr <= 0;
+		buf_len  <= 0;
+		buf_addr <= 0;
+	end else if (fifo_rd_en) begin
+		{buf_wptr, buf_len, buf_addr} <= fifo_rd_data;
+	end
 end
 
 reg  [2:0] hurryup = 0;
