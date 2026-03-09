@@ -311,6 +311,7 @@ wire       io_osd_vga   = io_ss1 & ~io_ss2;
 `endif
 
 reg        cfg_custom_t = 0;
+reg        cfg_custom_pend = 0;
 reg  [5:0] cfg_custom_p1;
 reg [31:0] cfg_custom_p2;
 
@@ -362,6 +363,13 @@ always@(posedge clk_sys) begin
 
 `ifndef MISTER_DEBUG_NOHDMI
 	shadowmask_wr <= 0;
+
+	// CDC: deferred toggle ensures cfg_custom_p1/p2 are stable
+	// for one full clk_sys cycle before the toggle propagates
+	if(cfg_custom_pend) begin
+		cfg_custom_pend <= 0;
+		cfg_custom_t <= ~cfg_custom_t;
+	end
 `endif
 
 	if(~io_uio) begin
@@ -421,7 +429,7 @@ always@(posedge clk_sys) begin
 					if(cnt == 1) begin
 						cfg_custom_p1 <= 0;
 						cfg_custom_p2 <= 0;
-						cfg_custom_t <= ~cfg_custom_t;
+						cfg_custom_pend <= 1;
 					end
 				end
 				else begin
@@ -429,7 +437,7 @@ always@(posedge clk_sys) begin
 					if(cnt[1:0]==1) cfg_custom_p2[15:0]  <= io_din;
 					if(cnt[1:0]==2) begin
 						cfg_custom_p2[31:16] <= io_din;
-						cfg_custom_t <= ~cfg_custom_t;
+						cfg_custom_pend <= 1;
 						cnt[2:0] <= 3'b100;
 					end
 					if(cnt == 8) {lowlat,cfg_done} <= {io_din[15],1'b1};
