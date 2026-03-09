@@ -27,6 +27,13 @@ always @(posedge clk_vid) gamma <= gamma_curve[gamma_index];
 reg [9:0] gamma_index;
 reg [7:0] gamma;
 
+// CDC: 2-FF sync for gamma_en (clk_sys -> clk_vid)
+reg gamma_en_d1, gamma_en_v;
+always @(posedge clk_vid) begin
+	gamma_en_d1 <= gamma_en;
+	gamma_en_v  <= gamma_en_d1;
+end
+
 always @(posedge clk_vid) begin
 	reg [7:0] R_in, G_in, B_in;
 	reg [7:0] R_gamma, G_gamma;
@@ -40,7 +47,7 @@ always @(posedge clk_vid) begin
 		hs <= HSync; vs <= VSync;
 		hb <= HBlank; vb <= VBlank;
 
-		RGB_out  <= gamma_en ? {R_gamma,G_gamma,gamma} : {R_in,G_in,B_in};
+		RGB_out  <= gamma_en_v ? {R_gamma,G_gamma,gamma} : {R_in,G_in,B_in};
 		HSync_out <= hs; VSync_out <= vs;
 		HBlank_out <= hb; VBlank_out <= vb;
 
@@ -102,6 +109,13 @@ end
 
 reg [7:0] gamma_index_r,gamma_index_g,gamma_index_b;
 
+// CDC: 2-FF sync for gamma_en (clk_sys -> clk_vid)
+reg gamma_en_d1, gamma_en_v;
+always @(posedge clk_vid) begin
+	gamma_en_d1 <= gamma_en;
+	gamma_en_v  <= gamma_en_d1;
+end
+
 always @(posedge clk_vid) begin
 	reg [7:0] R_in, G_in, B_in;
 	reg [7:0] R_gamma, G_gamma;
@@ -113,8 +127,8 @@ always @(posedge clk_vid) begin
 		hb <= HBlank; vb <= VBlank;
 		de <= DE;
 
-		RGB_out  <= gamma_en ? {gamma_curve_r[gamma_index_r],gamma_curve_g[gamma_index_g],gamma_curve_b[gamma_index_b]}
-	                        : {gamma_index_r,gamma_index_g,gamma_index_b};
+		RGB_out  <= gamma_en_v ? {gamma_curve_r[gamma_index_r],gamma_curve_g[gamma_index_g],gamma_curve_b[gamma_index_b]}
+	                          : {gamma_index_r,gamma_index_g,gamma_index_b};
 		HSync_out <= hs; VSync_out <= vs;
 		HBlank_out <= hb; VBlank_out <= vb;
 		DE_out <= de;

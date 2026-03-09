@@ -26,6 +26,36 @@ reg        mask_rotate;
 reg        mask_enable;
 reg [10:0] mask_lut[256];
 
+// CDC: snapshot config from clk_sys -> clk
+reg  [4:0] hmax_snap, vmax_snap;
+reg        mask_2x_snap, mask_rotate_snap;
+reg        mask_cfg_pend = 0;
+reg        mask_cfg_t = 0;
+
+// CDC: synchronized config in clk domain
+reg  [4:0] hmax_v, vmax_v;
+reg        mask_2x_v, mask_rotate_v;
+reg        mask_enable_v;
+
+always @(posedge clk) begin
+	reg mask_cfg_d1 = 0, mask_cfg_d2 = 0;
+	reg mask_en_d1 = 0;
+
+	// Sync toggle for multi-bit config
+	mask_cfg_d1 <= mask_cfg_t;
+	mask_cfg_d2 <= mask_cfg_d1;
+	if(mask_cfg_d2 != mask_cfg_d1) begin
+		hmax_v        <= hmax_snap;
+		vmax_v        <= vmax_snap;
+		mask_2x_v     <= mask_2x_snap;
+		mask_rotate_v <= mask_rotate_snap;
+	end
+
+	// 2-FF sync for single-bit mask_enable
+	mask_en_d1    <= mask_enable;
+	mask_enable_v <= mask_en_d1;
+end
+
 always @(posedge clk) begin
 	reg [4:0] hcount;
 	reg [4:0] vcount;
@@ -44,14 +74,14 @@ always @(posedge clk) begin
 	// hcount and vcount counts pixel rows and columns
 	// hindex and vindex half the value of the counters for double size patterns
 	// hindex2, vindex2 swap the h and v counters for drawing rotated masks
-	hindex <= mask_2x ? hcount[4:1] : hcount[3:0];
-	vindex <= mask_2x ? vcount[4:1] : vcount[3:0];
-	mask_idx <= mask_rotate ? {hindex,vindex} : {vindex,hindex};
+	hindex <= mask_2x_v ? hcount[4:1] : hcount[3:0];
+	vindex <= mask_2x_v ? vcount[4:1] : vcount[3:0];
+	mask_idx <= mask_rotate_v ? {hindex,vindex} : {vindex,hindex};
 
 	// hmax and vmax store these sizes
 	// hmax2 and vmax2 swap the values to handle rotation
-	hmax2 <= ((mask_rotate ? vmax : hmax) << mask_2x) | mask_2x;
-	vmax2 <= ((mask_rotate ? hmax : vmax) << mask_2x) | mask_2x;
+	hmax2 <= ((mask_rotate_v ? vmax_v : hmax_v) << mask_2x_v) | mask_2x_v;
+	vmax2 <= ((mask_rotate_v ? hmax_v : vmax_v) << mask_2x_v) | mask_2x_v;
 
 	pcnt <= pcnt+1'd1;
 	if(old_brd && ~brd_in) pde <= pcnt-4'd3;
@@ -76,7 +106,7 @@ always @(posedge clk) begin
 	lut <= mask_lut[mask_idx];
 
 	r_mul <= 5'b10000; g_mul <= 5'b10000; b_mul <= 5'b10000; // default 100% to all channels
-	if (mask_enable) begin
+	if (mask_enable_v) begin
 		r_mul <= lut[10] ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
 		g_mul <= lut[9]  ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
 		b_mul <= lut[8]  ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
@@ -121,11 +151,21 @@ always @(posedge clk_sys) begin
 	reg m_enable;
 	reg [7:0] idx;
 
+	// CDC: deferred snapshot for config params
+	if(mask_cfg_pend) begin
+		mask_cfg_pend    <= 0;
+		hmax_snap        <= hmax;
+		vmax_snap        <= vmax;
+		mask_2x_snap     <= mask_2x;
+		mask_rotate_snap <= mask_rotate;
+		mask_cfg_t       <= ~mask_cfg_t;
+	end
+
 	if (cmd_wr) begin
 		case(cmd_in[15:13])
-		3'b000: begin {m_enable, mask_rotate, mask_2x} <= cmd_in[3:1]; idx <= 0; end
-		3'b001: vmax <= cmd_in[3:0];
-		3'b010: hmax <= cmd_in[3:0];
+		3'b000: begin {m_enable, mask_rotate, mask_2x} <= cmd_in[3:1]; idx <= 0; mask_cfg_pend <= 1; end
+		3'b001: begin vmax <= cmd_in[3:0]; mask_cfg_pend <= 1; end
+		3'b010: begin hmax <= cmd_in[3:0]; mask_cfg_pend <= 1; end
 		3'b011: begin mask_lut[idx] <= cmd_in[10:0]; idx <= idx + 1'd1; end
 		endcase
 	end
