@@ -148,6 +148,7 @@ end
 reg        sda_out;
 reg  [7:0] lcd_data[1024];
 reg        lcd_sz;
+reg        mt32_newmode_pend = 0;
 
 reg        reset_r  = 0;
 wire [7:0] mode_req = reset_r ? 8'hA0 : mt32_mode_req ? 8'hA2 : 8'hA1;
@@ -168,6 +169,12 @@ always @(posedge CLK_AUDIO) begin : i2c_slave
 	
 	old_reset <= reset;
 	if(old_reset & ~reset) sda_out <= 1;
+
+	// CDC: deferred toggle ensures mt32_mode/rom/sf are stable
+	if(mt32_newmode_pend) begin
+		mt32_newmode_pend <= 0;
+		mt32_newmode <= ~mt32_newmode;
+	end
 
 	div <= div + 1'd1;
 	if(!div) begin
@@ -235,7 +242,7 @@ always @(posedge CLK_AUDIO) begin : i2c_slave
 							if(bcnt == 1) mt32_mode <= tmp;
 							if(bcnt == 2) mt32_rom  <= tmp;
 							if(bcnt == 3) mt32_sf   <= tmp;
-							if(bcnt == 3) mt32_newmode <= ~mt32_newmode;
+							if(bcnt == 3) mt32_newmode_pend <= 1;
 						end
 					end
 					if(~&bcnt) bcnt <= bcnt + 1'd1;
@@ -258,6 +265,16 @@ always @(posedge CLK_AUDIO) begin : i2c_slave
 	end
 end
 
+// CDC: 2-FF sync for single-bit signals (CLK_AUDIO -> CLK_VIDEO)
+reg mt32_available_v, lcd_sz_v;
+always @(posedge CLK_VIDEO) begin
+	reg mt32_available_d1, lcd_sz_d1;
+	mt32_available_d1 <= mt32_available;
+	mt32_available_v  <= mt32_available_d1;
+	lcd_sz_d1         <= lcd_sz;
+	lcd_sz_v          <= lcd_sz_d1;
+end
+
 always @(posedge CLK_VIDEO) begin
 	reg old_de, old_vs;
 	reg [7:0] hcnt;
@@ -275,7 +292,7 @@ always @(posedge CLK_VIDEO) begin
 		if(old_de & ~VGA_DE & ~&vcnt) vcnt <= vcnt + 1'd1;
 		if(~old_vs & VGA_VS) vcnt <= 0;
 
-		mt32_lcd_en  <= mt32_available & ~hcnt[7] && (lcd_sz ? !vcnt[6] : !vcnt[6:5]);
+		mt32_lcd_en  <= mt32_available_v & ~hcnt[7] && (lcd_sz_v ? !vcnt[6] : !vcnt[6:5]);
 		mt32_lcd_pix <= lcd_data[{vcnt[5:3],hcnt[6:0]}][vcnt[2:0]];
 	end
 end
