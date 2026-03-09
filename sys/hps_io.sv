@@ -340,7 +340,7 @@ always@(posedge clk_sys) begin : uio_block
 				  'h36: begin io_dout <= info_n; info_n <= 0; end
 				  'h39: io_dout <= 1;
 				  'h3C: if(upload_req) begin io_dout <= {ioctl_upload_index, 8'd1}; upload_req <= 0; end				  
-				  'h43: io_dout <= F12KEYMOD;
+				  'h43: io_dout <= F12KEYMOD[15:0];
 				  
 				  'h3E: io_dout <= 1; // shadow mask
 				'h003F: io_dout <= joystick_0_rumble;
