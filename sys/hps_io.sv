@@ -882,30 +882,70 @@ module video_calc
 	output reg [15:0] dout
 );
 
+// CDC: snapshot registers from clk_vid -> clk_sys
+reg [31:0] vid_hcnt_sys = 0, vid_vcnt_sys = 0, vid_ccnt_sys = 0;
+reg  [7:0] vid_nres_sys = 0;
+reg  [1:0] vid_int_sys  = 0;
+reg  [7:0] vid_pixrep_sys;
+reg [15:0] vid_de_h_sys;
+reg  [7:0] vid_de_v_sys;
+
+// CDC: snapshot registers from clk_100 -> clk_sys
+reg [31:0] vid_htime_sys = 0, vid_vtime_sys = 0, vid_pix_sys = 0;
+reg [31:0] vid_vtime_hdmi_sys = 0;
+
 always @(posedge clk_sys) begin
+	reg vid_snap_d1 = 0, vid_snap_d2 = 0;
+	reg t100_snap_d1 = 0, t100_snap_d2 = 0;
+
+	// Synchronize clk_vid snapshot toggle
+	vid_snap_d1 <= vid_snap_t;
+	vid_snap_d2 <= vid_snap_d1;
+	if(vid_snap_d2 != vid_snap_d1) begin
+		vid_hcnt_sys   <= vid_hcnt_snap;
+		vid_vcnt_sys   <= vid_vcnt_snap;
+		vid_ccnt_sys   <= vid_ccnt_snap;
+		vid_nres_sys   <= vid_nres_snap;
+		vid_int_sys    <= vid_int_snap;
+		vid_pixrep_sys <= vid_pixrep_snap;
+		vid_de_h_sys   <= vid_de_h_snap;
+		vid_de_v_sys   <= vid_de_v_snap;
+	end
+
+	// Synchronize clk_100 snapshot toggle
+	t100_snap_d1 <= t100_snap_t;
+	t100_snap_d2 <= t100_snap_d1;
+	if(t100_snap_d2 != t100_snap_d1) begin
+		vid_htime_sys      <= vid_htime_snap;
+		vid_vtime_sys      <= vid_vtime_snap;
+		vid_pix_sys        <= vid_pix_snap;
+		vid_vtime_hdmi_sys <= vid_vtime_hdmi_snap;
+	end
+
 	case(par_num)
-		1: dout <= {video_rotated, |vid_int, vid_nres};
-		2: dout <= vid_hcnt[15:0];
-		3: dout <= vid_hcnt[31:16];
-		4: dout <= vid_vcnt[15:0];
-		5: dout <= vid_vcnt[31:16];
-		6: dout <= vid_htime[15:0];
-		7: dout <= vid_htime[31:16];
-		8: dout <= vid_vtime[15:0];
-		9: dout <= vid_vtime[31:16];
-	  10: dout <= vid_pix[15:0];
-	  11: dout <= vid_pix[31:16];
-	  12: dout <= vid_vtime_hdmi[15:0];
-	  13: dout <= vid_vtime_hdmi[31:16];
-	  14: dout <= vid_ccnt[15:0];
-	  15: dout <= vid_ccnt[31:16];
-	  16: dout <= vid_pixrep;
-	  17: dout <= vid_de_h;
-	  18: dout <= vid_de_v;
+		1: dout <= {video_rotated, |vid_int_sys, vid_nres_sys};
+		2: dout <= vid_hcnt_sys[15:0];
+		3: dout <= vid_hcnt_sys[31:16];
+		4: dout <= vid_vcnt_sys[15:0];
+		5: dout <= vid_vcnt_sys[31:16];
+		6: dout <= vid_htime_sys[15:0];
+		7: dout <= vid_htime_sys[31:16];
+		8: dout <= vid_vtime_sys[15:0];
+		9: dout <= vid_vtime_sys[31:16];
+	  10: dout <= vid_pix_sys[15:0];
+	  11: dout <= vid_pix_sys[31:16];
+	  12: dout <= vid_vtime_hdmi_sys[15:0];
+	  13: dout <= vid_vtime_hdmi_sys[31:16];
+	  14: dout <= vid_ccnt_sys[15:0];
+	  15: dout <= vid_ccnt_sys[31:16];
+	  16: dout <= vid_pixrep_sys;
+	  17: dout <= vid_de_h_sys;
+	  18: dout <= vid_de_v_sys;
 	  default dout <= 0;
 	endcase
 end
 
+// Working registers in clk_vid domain
 reg [31:0] vid_hcnt = 0;
 reg [31:0] vid_vcnt = 0;
 reg [31:0] vid_ccnt = 0;
@@ -914,6 +954,15 @@ reg  [1:0] vid_int  = 0;
 reg  [7:0] vid_pixrep;
 reg [15:0] vid_de_h;
 reg  [7:0] vid_de_v;
+
+// Snapshot holding registers (clk_vid -> clk_sys)
+reg [31:0] vid_hcnt_snap = 0, vid_vcnt_snap = 0, vid_ccnt_snap = 0;
+reg  [7:0] vid_nres_snap = 0;
+reg  [1:0] vid_int_snap  = 0;
+reg  [7:0] vid_pixrep_snap;
+reg [15:0] vid_de_h_snap;
+reg  [7:0] vid_de_v_snap;
+reg        vid_snap_t = 0;
 
 always @(posedge clk_vid) begin
 	integer hcnt;
@@ -964,6 +1013,18 @@ always @(posedge clk_vid) begin
 					vid_vcnt <= vcnt;
 					vid_ccnt <= ccnt;
 				end
+
+				// Snapshot for CDC to clk_sys
+				vid_hcnt_snap   <= hcnt;
+				vid_vcnt_snap   <= vcnt;
+				vid_ccnt_snap   <= ccnt;
+				vid_nres_snap   <= vid_nres;
+				vid_int_snap    <= {vid_int[0],f1};
+				vid_pixrep_snap <= vid_pixrep;
+				vid_de_h_snap   <= vid_de_h;
+				vid_de_v_snap   <= vid_de_v;
+				vid_snap_t      <= ~vid_snap_t;
+
 				vcnt <= 0;
 				hcnt <= 0;
 				ccnt <= 0;
@@ -974,9 +1035,15 @@ always @(posedge clk_vid) begin
 	end
 end
 
+// Working registers in clk_100 domain
 reg [31:0] vid_htime = 0;
 reg [31:0] vid_vtime = 0;
 reg [31:0] vid_pix = 0;
+
+// Snapshot holding registers (clk_100 -> clk_sys)
+reg [31:0] vid_htime_snap = 0, vid_vtime_snap = 0, vid_pix_snap = 0;
+reg [31:0] vid_vtime_hdmi_snap = 0;
+reg        t100_snap_t = 0;
 
 always @(posedge clk_100) begin
 	integer vtime, htime, hcnt;
@@ -995,6 +1062,8 @@ always @(posedge clk_100) begin
 	if(~old_vs2 & old_vs) begin
 		vid_pix <= hcnt;
 		vid_vtime <= vtime;
+		vid_pix_snap   <= hcnt;
+		vid_vtime_snap <= vtime;
 		vtime <= 0;
 		hcnt <= 0;
 	end
@@ -1003,6 +1072,7 @@ always @(posedge clk_100) begin
 
 	if(~old_hs2 & old_hs) begin
 		vid_htime <= htime;
+		vid_htime_snap <= htime;
 		htime <= 0;
 	end
 
@@ -1025,6 +1095,8 @@ always @(posedge clk_100) begin
 
 	if(~old_vs2 & old_vs) begin
 		vid_vtime_hdmi <= vtime;
+		vid_vtime_hdmi_snap <= vtime;
+		t100_snap_t <= ~t100_snap_t;
 		vtime <= 0;
 	end
 end
