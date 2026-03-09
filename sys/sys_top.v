@@ -1023,17 +1023,56 @@ wire [47:0] pal_d = {pal_data[55:32], pal_data[23:0]};
 wire  [6:0] pal_a = ram2_bcnt[6:0];
 wire        pal_wr;
 
+// CDC: sync FB config from clk_sys -> clk_pal
+reg [28:0] pal_lfb_base;
+reg  [2:0] pal_fb_fmt;
+reg        pal_fb_en;
+
+always @(posedge clk_pal) begin
+	reg fb_cfg_d1 = 0, fb_cfg_d2 = 0;
+
+	fb_cfg_d1 <= fb_pal_cfg_t;
+	fb_cfg_d2 <= fb_cfg_d1;
+	if(fb_cfg_d2 != fb_cfg_d1) begin
+		pal_lfb_base <= fb_pal_lfb_base_snap;
+		pal_fb_fmt   <= fb_pal_fb_fmt_snap;
+		pal_fb_en    <= fb_pal_fb_en_snap;
+	end
+end
+
+reg [28:0] fb_pal_lfb_base_snap;
+reg  [2:0] fb_pal_fb_fmt_snap;
+reg        fb_pal_fb_en_snap;
+reg        fb_pal_cfg_t = 0;
+
+always @(posedge clk_sys) begin
+	reg old_fb_en;
+	reg [2:0] old_fb_fmt;
+	reg [28:0] old_lfb_base;
+
+	// Snapshot when any value changes
+	if(old_fb_en != FB_EN || old_fb_fmt != FB_FMT[2:0] || old_lfb_base != LFB_BASE[31:3]) begin
+		fb_pal_lfb_base_snap <= LFB_BASE[31:3];
+		fb_pal_fb_fmt_snap   <= FB_FMT[2:0];
+		fb_pal_fb_en_snap    <= FB_EN;
+		fb_pal_cfg_t         <= ~fb_pal_cfg_t;
+	end
+	old_fb_en    <= FB_EN;
+	old_fb_fmt   <= FB_FMT[2:0];
+	old_lfb_base <= LFB_BASE[31:3];
+end
+
 reg  [28:0] pal_addr;
 reg         pal_req = 0;
 always @(posedge clk_pal) begin
 	reg old_vs1, old_vs2;
 
-	pal_addr <= LFB_BASE[31:3] - 29'd512;
+	pal_addr <= pal_lfb_base - 29'd512;
 
 	old_vs1 <= hdmi_vs;
 	old_vs2 <= old_vs1;
-	
-	if(~old_vs2 & old_vs1 & ~FB_FMT[2] & FB_FMT[1] & FB_FMT[0] & FB_EN) pal_req <= ~pal_req;
+
+	if(~old_vs2 & old_vs1 & ~pal_fb_fmt[2] & pal_fb_fmt[1] & pal_fb_fmt[0] & pal_fb_en) pal_req <= ~pal_req;
 end
 
 
