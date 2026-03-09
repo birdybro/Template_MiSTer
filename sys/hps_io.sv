@@ -945,10 +945,9 @@ always @(posedge clk_sys) begin
 	endcase
 end
 
-// Working registers in clk_vid domain
+// Working registers in clk_vid domain (vid_hcnt/vid_vcnt used for resolution change detection)
 reg [31:0] vid_hcnt = 0;
 reg [31:0] vid_vcnt = 0;
-reg [31:0] vid_ccnt = 0;
 reg  [7:0] vid_nres = 0;
 reg  [1:0] vid_int  = 0;
 reg  [7:0] vid_pixrep;
@@ -1011,7 +1010,6 @@ always @(posedge clk_vid) begin
 					if(&resto) vid_nres <= vid_nres + 1'd1;
 					vid_hcnt <= hcnt;
 					vid_vcnt <= vcnt;
-					vid_ccnt <= ccnt;
 				end
 
 				// Snapshot for CDC to clk_sys
@@ -1035,11 +1033,6 @@ always @(posedge clk_vid) begin
 	end
 end
 
-// Working registers in clk_100 domain
-reg [31:0] vid_htime = 0;
-reg [31:0] vid_vtime = 0;
-reg [31:0] vid_pix = 0;
-
 // Snapshot holding registers (clk_100 -> clk_sys)
 reg [31:0] vid_htime_snap = 0, vid_vtime_snap = 0, vid_pix_snap = 0;
 reg [31:0] vid_vtime_hdmi_snap = 0;
@@ -1060,8 +1053,6 @@ always @(posedge clk_100) begin
 	htime <= htime + 1'd1;
 
 	if(~old_vs2 & old_vs) begin
-		vid_pix <= hcnt;
-		vid_vtime <= vtime;
 		vid_pix_snap   <= hcnt;
 		vid_vtime_snap <= vtime;
 		vtime <= 0;
@@ -1071,7 +1062,6 @@ always @(posedge clk_100) begin
 	if(old_vs2 & ~old_vs) calch <= 1;
 
 	if(~old_hs2 & old_hs) begin
-		vid_htime <= htime;
 		vid_htime_snap <= htime;
 		htime <= 0;
 	end
@@ -1083,7 +1073,6 @@ always @(posedge clk_100) begin
 	if(old_de2 & ~old_de) calch <= 0;
 end
 
-reg [31:0] vid_vtime_hdmi;
 always @(posedge clk_100) begin
 	integer vtime;
 	reg old_vs, old_vs2;
@@ -1094,7 +1083,6 @@ always @(posedge clk_100) begin
 	vtime <= vtime + 1'd1;
 
 	if(~old_vs2 & old_vs) begin
-		vid_vtime_hdmi <= vtime;
 		vid_vtime_hdmi_snap <= vtime;
 		t100_snap_t <= ~t100_snap_t;
 		vtime <= 0;
