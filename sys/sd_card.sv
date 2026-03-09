@@ -88,7 +88,7 @@ localparam PREF_STATE_FINISH   = 2;
 altsyncram sdbuf
 (
 	.clock0    (clk_sys),
-	.address_a ({sd_buf,sd_buff_addr}),
+	.address_a ({sd_buf_sys,sd_buff_addr}),
 	.data_a    (sd_buff_dout),
 	.wren_a    (sd_ack & sd_buff_wr),
 	.q_a       (sd_buff_din),
@@ -167,6 +167,17 @@ wire [7:0] buffer_dout;
 reg        buffer_wr;
 
 reg  [1:0] sd_buf, spi_buf;
+
+// CDC: gray-code sd_buf from clk_spi -> clk_sys for RAM port A address
+reg  [1:0] sd_buf_gray;
+always @(posedge clk_spi) sd_buf_gray <= sd_buf ^ (sd_buf >> 1);
+
+reg  [1:0] sd_buf_gray_sys1 = 0, sd_buf_gray_sys2 = 0;
+wire [1:0] sd_buf_sys = {sd_buf_gray_sys2[1], sd_buf_gray_sys2[1] ^ sd_buf_gray_sys2[0]};
+always @(posedge clk_sys) begin
+	sd_buf_gray_sys1 <= sd_buf_gray;
+	sd_buf_gray_sys2 <= sd_buf_gray_sys1;
+end
 
 reg  [6:0] sbuf;
 reg  [2:0] bit_cnt;
