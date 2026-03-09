@@ -46,18 +46,48 @@ reg [21:0] osd_w;
 
 reg  [1:0] rot = 0;
 
+// CDC: snapshot registers (clk_sys -> clk_video)
+reg        osd_enable_snap;
+reg        info_snap;
+reg  [1:0] rot_snap;
+reg [21:0] infox_snap, infoy_snap;
+reg  [8:0] infow_snap, infoh_snap;
+reg [21:0] osd_h_snap, osd_t_snap, osd_w_snap;
+reg        osd_snap_pend = 0;
+reg        osd_snap_t = 0;
+
 always@(posedge clk_sys) begin
 	reg [12:0] bcnt;
 	reg  [7:0] cmd;
 	reg        has_cmd;
 	reg        old_strobe;
 	reg        highres = 0;
+	reg        old_io_osd;
 
 	osd_t <= rot[0] ? OSD_WIDTH : (OSD_HEIGHT<<1);
 	osd_h <= rot[0] ? (info ? infow : OSD_WIDTH) : info ? infoh : (OSD_HEIGHT<<highres);
 	osd_w <= rot[0] ? (info ? infoh : (OSD_HEIGHT<<highres)) : (info ? infow : OSD_WIDTH);
 
 	old_strobe <= io_strobe;
+
+	// CDC: deferred snapshot ensures all params are stable
+	if(osd_snap_pend) begin
+		osd_snap_pend  <= 0;
+		osd_enable_snap <= osd_enable;
+		info_snap       <= info;
+		rot_snap        <= rot;
+		infox_snap      <= infox;
+		infoy_snap      <= infoy;
+		infow_snap      <= infow;
+		infoh_snap      <= infoh;
+		osd_h_snap      <= osd_h;
+		osd_t_snap      <= osd_t;
+		osd_w_snap      <= osd_w;
+		osd_snap_t      <= ~osd_snap_t;
+	end
+
+	old_io_osd <= io_osd;
+	if(old_io_osd & ~io_osd) osd_snap_pend <= 1;
 
 	if(~io_osd) begin
 		bcnt <= 0;
@@ -99,6 +129,33 @@ always@(posedge clk_sys) begin
 	end
 end
 
+// CDC: synchronized OSD params in clk_video domain
+reg        osd_enable_v;
+reg        info_v;
+reg  [1:0] rot_v = 0;
+reg [21:0] infox_v, infoy_v;
+reg  [8:0] infow_v, infoh_v;
+reg [21:0] osd_h_v, osd_t_v, osd_w_v;
+
+always @(posedge clk_video) begin
+	reg osd_snap_d1 = 0, osd_snap_d2 = 0;
+
+	osd_snap_d1 <= osd_snap_t;
+	osd_snap_d2 <= osd_snap_d1;
+	if(osd_snap_d2 != osd_snap_d1) begin
+		osd_enable_v <= osd_enable_snap;
+		info_v       <= info_snap;
+		rot_v        <= rot_snap;
+		infox_v      <= infox_snap;
+		infoy_v      <= infoy_snap;
+		infow_v      <= infow_snap;
+		infoh_v      <= infoh_snap;
+		osd_h_v      <= osd_h_snap;
+		osd_t_v      <= osd_t_snap;
+		osd_w_v      <= osd_w_snap;
+	end
+end
+
 (* direct_enable *) reg ce_pix;
 always @(posedge clk_video) begin
 	reg [21:0] cnt = 0;
@@ -115,7 +172,7 @@ always @(posedge clk_video) begin
 	if(~deD && de_in) cnt <= 0;
 
 	if(deD && ~de_in) begin
-		pixsz  <= (((cnt+1'b1) >> (9-rot[0])) > 1) ? (((cnt+1'b1) >> (9-rot[0])) - 1'd1) : 22'd0;
+		pixsz  <= (((cnt+1'b1) >> (9-rot_v[0])) > 1) ? (((cnt+1'b1) >> (9-rot_v[0])) - 1'd1) : 22'd0;
 		pixcnt <= 0;
 	end
 end
@@ -127,11 +184,11 @@ reg        v_cnt_h, v_cnt_1, v_cnt_2, v_cnt_3, v_cnt_4;
 reg [21:0] v_osd_start_h, v_osd_start_1, v_osd_start_2, v_osd_start_3, v_osd_start_4, v_osd_start_5;
 reg [21:0] v_info_start_h, v_info_start_1, v_info_start_2, v_info_start_3, v_info_start_4, v_info_start_5;
 
-wire [21:0] osd_h_hdr = (info || rot) ? osd_h : (osd_h + OSD_HDR);
+wire [21:0] osd_h_hdr = (info_v || rot_v) ? osd_h_v : (osd_h_v + OSD_HDR);
 
 // pipeline the comparisons a bit
 always @(posedge clk_video) if(ce_pix) begin
-	v_cnt_h <= v_cnt <= osd_t;
+	v_cnt_h <= v_cnt <= osd_t_v;
 	v_cnt_1 <= v_cnt < 320;
 	v_cnt_2 <= v_cnt < 640;
 	v_cnt_3 <= v_cnt < 960;
@@ -144,19 +201,19 @@ always @(posedge clk_video) if(ce_pix) begin
 	v_osd_start_4 <= (v_cnt-(osd_h_hdr<<2))>>1;
 	v_osd_start_5 <= (v_cnt-(osd_h_hdr + (osd_h_hdr<<2)))>>1;
 
-	v_info_start_h <= rot[0] ? infox : infoy;
-	v_info_start_1 <= rot[0] ? infox : infoy;
-	v_info_start_2 <= rot[0] ? (infox<<1) : (infoy<<1);
-	v_info_start_3 <= rot[0] ? (infox + (infox << 1)) : (infoy + (infoy << 1));
-	v_info_start_4 <= rot[0] ? (infox << 2) : (infoy << 2);
-	v_info_start_5 <= rot[0] ? (infox + (infox << 2)) : (infoy + (infoy << 2));
+	v_info_start_h <= rot_v[0] ? infox_v : infoy_v;
+	v_info_start_1 <= rot_v[0] ? infox_v : infoy_v;
+	v_info_start_2 <= rot_v[0] ? (infox_v<<1) : (infoy_v<<1);
+	v_info_start_3 <= rot_v[0] ? (infox_v + (infox_v << 1)) : (infoy_v + (infoy_v << 1));
+	v_info_start_4 <= rot_v[0] ? (infox_v << 2) : (infoy_v << 2);
+	v_info_start_5 <= rot_v[0] ? (infox_v + (infox_v << 2)) : (infoy_v + (infoy_v << 2));
 end
 
 always @(posedge clk_video) begin
 	reg        deD;
 	reg  [2:0] osd_div;
 	reg  [2:0] multiscan;
-	reg  [7:0] osd_byte; 
+	reg  [7:0] osd_byte;
 	reg [23:0] h_cnt;
 	reg [21:0] dsp_width;
 	reg [21:0] osd_vcnt;
@@ -178,16 +235,16 @@ always @(posedge clk_video) begin
 		if(~&osd_hcnt2) osd_hcnt2 <= osd_hcnt2 + 1'd1;
 
 		if (h_cnt == h_osd_start) begin
-			osd_de[0] <= osd_en[1] && osd_h && (
+			osd_de[0] <= osd_en[1] && osd_h_v && (
 		                  osd_vcnt[11] ? (osd_vcnt[7] && (osd_vcnt[6:0] >= 4) && (osd_vcnt[6:0] < 19)) :
-								(info && (rot == 3)) ? !osd_vcnt[21:8] :
-			               (osd_vcnt < osd_h)
+								(info_v && (rot_v == 3)) ? !osd_vcnt[21:8] :
+			               (osd_vcnt < osd_h_v)
 								);
 			osd_hcnt <= 0;
 			osd_hcnt2 <= 0;
-			if(info && rot == 1) osd_hcnt2 <= 22'd128-infoh;
+			if(info_v && rot_v == 1) osd_hcnt2 <= 22'd128-infoh_v;
 		end
-		if (osd_hcnt+1 == osd_w) osd_de[0] <= 0;
+		if (osd_hcnt+1 == osd_w_v) osd_de[0] <= 0;
 
 		// falling edge of de
 		if(!de_in && deD) dsp_width <= h_cnt[21:0];
@@ -196,41 +253,41 @@ always @(posedge clk_video) begin
 		if(de_in && !deD) begin
 			h_cnt <= 0;
 			v_cnt <= v_cnt + 1'd1;
-			h_osd_start <= info ? (rot[0] ? infoy : infox) : (((dsp_width - osd_w)>>1) - 2'd2);
+			h_osd_start <= info_v ? (rot_v[0] ? infoy_v : infox_v) : (((dsp_width - osd_w_v)>>1) - 2'd2);
 
 			if(h_cnt > {dsp_width, 2'b00}) begin
 				v_cnt <= 1;
 				f1 <= ~f1; // skip every other frame for interlace compatibility.
 				if(~f1) begin
 
-					osd_en <= (osd_en << 1) | osd_enable;
-					if(~osd_enable) osd_en <= 0;
+					osd_en <= (osd_en << 1) | osd_enable_v;
+					if(~osd_enable_v) osd_en <= 0;
 
 					half <= 0;
 					if(v_cnt_h) begin
 						multiscan <= 0;
-						v_osd_start <= info ? v_info_start_h : v_osd_start_h;
+						v_osd_start <= info_v ? v_info_start_h : v_osd_start_h;
 						half <= 1;
 					end
-					else if(v_cnt_1 | (rot[0] & v_cnt_2)) begin
+					else if(v_cnt_1 | (rot_v[0] & v_cnt_2)) begin
 						multiscan <= 0;
-						v_osd_start <= info ? v_info_start_1 : v_osd_start_1;
+						v_osd_start <= info_v ? v_info_start_1 : v_osd_start_1;
 					end
-					else if(rot[0] ? v_cnt_3 : v_cnt_2) begin
+					else if(rot_v[0] ? v_cnt_3 : v_cnt_2) begin
 						multiscan <= 1;
-						v_osd_start <= info ? v_info_start_2 : v_osd_start_2;
+						v_osd_start <= info_v ? v_info_start_2 : v_osd_start_2;
 					end
-					else if(rot[0] ? v_cnt_4 : v_cnt_3) begin
+					else if(rot_v[0] ? v_cnt_4 : v_cnt_3) begin
 						multiscan <= 2;
-						v_osd_start <= info ? v_info_start_3 : v_osd_start_3;
+						v_osd_start <= info_v ? v_info_start_3 : v_osd_start_3;
 					end
-					else if(rot[0] | v_cnt_4) begin
+					else if(rot_v[0] | v_cnt_4) begin
 						multiscan <= 3;
-						v_osd_start <= info ? v_info_start_4 : v_osd_start_4;
+						v_osd_start <= info_v ? v_info_start_4 : v_osd_start_4;
 					end
 					else begin
 						multiscan <= 4;
-						v_osd_start <= info ? v_info_start_5 : v_osd_start_5;
+						v_osd_start <= info_v ? v_info_start_5 : v_osd_start_5;
 					end
 				end
 			end
@@ -239,17 +296,17 @@ always @(posedge clk_video) begin
 			if(osd_div == multiscan) begin
 				osd_div <= 0;
 				if(~osd_vcnt[10]) osd_vcnt <= osd_vcnt + 1'd1 + half;
-				if(osd_vcnt == 'b100010011111 && ~info) osd_vcnt <= 0;
+				if(osd_vcnt == 'b100010011111 && ~info_v) osd_vcnt <= 0;
 			end
 			if(v_osd_start == v_cnt) begin
 				{osd_div,osd_vcnt} <= 0;
-				if(info && rot == 3) osd_vcnt <= 22'd256-infow;
-				else if(OSD_HDR && !rot) osd_vcnt <= {~info, 3'b000, ~info, 7'b0000000};
+				if(info_v && rot_v == 3) osd_vcnt <= 22'd256-infow_v;
+				else if(OSD_HDR && !rot_v) osd_vcnt <= {~info_v, 3'b000, ~info_v, 7'b0000000};
 			end
 		end
 
-		osd_byte  <= osd_buffer[rot[0] ? ({osd_hcnt2[6:3], osd_vcnt[7:0]} ^ { {4{~rot[1]}}, {8{rot[1]}} }) : {osd_vcnt[7:3], osd_hcnt[7:0]}];
-		osd_pixel <= osd_byte[rot[0] ? ((osd_hcnt2[2:0]-1'd1) ^ {3{~rot[1]}}) : osd_vcnt[2:0]];
+		osd_byte  <= osd_buffer[rot_v[0] ? ({osd_hcnt2[6:3], osd_vcnt[7:0]} ^ { {4{~rot_v[1]}}, {8{rot_v[1]}} }) : {osd_vcnt[7:3], osd_hcnt[7:0]}];
+		osd_pixel <= osd_byte[rot_v[0] ? ((osd_hcnt2[2:0]-1'd1) ^ {3{~rot_v[1]}}) : osd_vcnt[2:0]];
 		osd_de[2:1] <= osd_de[1:0];
 	end
 end
