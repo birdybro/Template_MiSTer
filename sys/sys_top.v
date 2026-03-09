@@ -864,8 +864,13 @@ always @(posedge clk_sys) begin
 end
 
 `ifdef MISTER_FB
+	// CDC: 2-FF sync for hdmi_vbl (clk_hdmi -> clk_vid)
 	reg fb_vbl;
-	always @(posedge clk_vid) fb_vbl <= hdmi_vbl;
+	always @(posedge clk_vid) begin
+		reg hdmi_vbl_d1;
+		hdmi_vbl_d1 <= hdmi_vbl;
+		fb_vbl      <= hdmi_vbl_d1;
+	end
 `endif
 
 reg  ar_md_start;
