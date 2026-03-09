@@ -154,7 +154,7 @@ wire        fifo_empty;
 wire        fifo_full;
 wire        fifo_rd_en = sample_ce & ~fifo_empty;
 
-audio_cdc_fifo #(
+async_fifo #(
 	.DATA_WIDTH(32),
 	.ADDR_WIDTH(2)
 ) audio_fifo (

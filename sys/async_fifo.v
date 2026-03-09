@@ -1,5 +1,5 @@
 //
-//  Asynchronous FIFO with gray-code pointers for audio CDC.
+//  Asynchronous FIFO with gray-code pointers for clock domain crossing.
 //  Copyright (C) Kevin Coleman 2026
 //
 //  This program is free software; you can redistribute it and/or modify it
@@ -17,7 +17,7 @@
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //
 
-module audio_cdc_fifo
+module async_fifo
 #(
 	parameter DATA_WIDTH = 32,
 	parameter ADDR_WIDTH = 2   // 2^2 = 4 entries
