@@ -1549,9 +1549,16 @@ assign SDCD_SPDIF = (mcp_en & ~spdif) ? 1'b0 : 1'bZ;
 `ifndef MISTER_DUAL_SDRAM
 	wire analog_l, analog_r;
 
-	assign AUDIO_SPDIF = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_LRCLK : spdif;
-	assign AUDIO_R     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_I2S   : analog_r;
-	assign AUDIO_L     = av_dis ? 1'bZ : (SW[0] | mcp_en) ? HDMI_SCLK  : analog_l;
+	reg audio_l_r, audio_r_r, audio_spdif_r;
+	always @(posedge clk_audio) begin
+		audio_l_r     <= (SW[0] | mcp_en) ? HDMI_SCLK  : analog_l;
+		audio_r_r     <= (SW[0] | mcp_en) ? HDMI_I2S   : analog_r;
+		audio_spdif_r <= (SW[0] | mcp_en) ? HDMI_LRCLK : spdif;
+	end
+
+	assign AUDIO_SPDIF = av_dis ? 1'bZ : audio_spdif_r;
+	assign AUDIO_R     = av_dis ? 1'bZ : audio_r_r;
+	assign AUDIO_L     = av_dis ? 1'bZ : audio_l_r;
 `endif
 
 assign HDMI_MCLK = clk_audio;
