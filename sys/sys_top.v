@@ -1576,6 +1576,7 @@ audio_out audio_out
 (
 	.reset(reset | areset),
 	.clk(clk_audio),
+	.clk_core(clk_sys),
 
 	.att(vol_att),
 	.mix(audio_mix),
