@@ -340,8 +340,8 @@ reg [AW:0] rd_ptr_bin  = 0;
 reg [AW:0] wr_ptr_gray_rd1 = 0, wr_ptr_gray_rd = 0; // wr pointer synced to rd clock
 reg [AW:0] rd_ptr_gray_wr1 = 0, rd_ptr_gray_wr = 0; // rd pointer synced to wr clock
 
-// FIFO memory
-reg [DW-1:0] mem [0:(1<<AW)-1];
+// FIFO memory — force registers, not block RAM (only 4x32 = 128 bits)
+(* ramstyle = "logic" *) reg [DW-1:0] mem [0:(1<<AW)-1];
 
 // Output register
 reg [DW-1:0] rd_data_r = 0;
