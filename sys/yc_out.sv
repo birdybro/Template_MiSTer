@@ -127,10 +127,11 @@ always_ff @(posedge clk) begin
 	red_2 <= red_1;
 	blue_2 <= blue_1;
 
-	// Calculate Luma signal
-	yr <= {red, 8'd0} + {red, 5'd0}+ {red, 4'd0} + {red, 1'd0};
-	yg <= {green, 9'd0} + {green, 6'd0} + {green, 4'd0} + {green, 3'd0} + green;
-	yb <= {blue, 6'd0} + {blue, 5'd0} + {blue, 4'd0} + {blue, 2'd0} + blue;
+	// Calculate Luma signal (uses DSP blocks instead of adder trees)
+	// Y = 0.299R + 0.587G + 0.114B scaled by 1024
+	yr <= red * 21'd306;
+	yg <= green * 21'd601;
+	yb <= blue * 21'd117;
 	phase[0].y <= yr + yg + yb;
 
 	// Generate the LUT values using the phase accumulator reference.
@@ -150,11 +151,12 @@ always_ff @(posedge clk) begin
 	chroma_LUT_SIN <= chroma_LUT;
 	chroma_LUT_COS <= chroma_LUT + 8'd64;
 
-	// Calculate for U, V - Bit Shift Multiple by u = by * 1024 x 0.492 = 504, v = ry * 1024 x 0.877 = 898
+	// Calculate for U, V (uses DSP blocks instead of adder trees)
+	// U = (B'-Y) * 504, V = (R'-Y) * 898
 	phase[0].u <= $signed({2'b0 ,(blue_2)}) - $signed({2'b0 ,phase[0].y[17:10]});
 	phase[0].v <= $signed({2'b0 , (red_2)}) - $signed({2'b0 ,phase[0].y[17:10]});
-	phase[1].u <= 21'($signed({phase[0].u, 8'd0}) + $signed({phase[0].u, 7'd0}) + $signed({phase[0].u, 6'd0}) + $signed({phase[0].u, 5'd0}) + $signed({phase[0].u, 4'd0}) + $signed({phase[0].u, 3'd0}));
-	phase[1].v <= 21'($signed({phase[0].v, 9'd0}) + $signed({phase[0].v, 8'd0}) + $signed({phase[0].v, 7'd0}) + $signed({phase[0].v, 1'd0}));
+	phase[1].u <= 21'(phase[0].u * 21'sd504);
+	phase[1].v <= 21'(phase[0].v * 21'sd898);
 
 	phase[0].c <= vref;
 	phase[1].c <= phase[0].c;
