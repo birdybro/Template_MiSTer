@@ -46,6 +46,14 @@ reg [21:0] osd_w;
 
 reg  [1:0] rot = 0;
 
+// 2-FF synchronizers for 1-bit control signals (clk_sys -> clk_video CDC)
+reg osd_enable_s1, osd_enable_s2;
+reg info_s1, info_s2;
+always @(posedge clk_video) begin
+	osd_enable_s1 <= osd_enable; osd_enable_s2 <= osd_enable_s1;
+	info_s1       <= info;       info_s2       <= info_s1;
+end
+
 always@(posedge clk_sys) begin
 	reg [12:0] bcnt;
 	reg  [7:0] cmd;
@@ -127,7 +135,7 @@ reg        v_cnt_h, v_cnt_1, v_cnt_2, v_cnt_3, v_cnt_4;
 reg [21:0] v_osd_start_h, v_osd_start_1, v_osd_start_2, v_osd_start_3, v_osd_start_4, v_osd_start_5;
 reg [21:0] v_info_start_h, v_info_start_1, v_info_start_2, v_info_start_3, v_info_start_4, v_info_start_5;
 
-wire [21:0] osd_h_hdr = (info || rot) ? osd_h : (osd_h + OSD_HDR);
+wire [21:0] osd_h_hdr = (info_s2 || rot) ? osd_h : (osd_h + OSD_HDR);
 
 // pipeline the comparisons a bit
 always @(posedge clk_video) if(ce_pix) begin
@@ -180,12 +188,12 @@ always @(posedge clk_video) begin
 		if (h_cnt == h_osd_start) begin
 			osd_de[0] <= osd_en[1] && osd_h && (
 		                  osd_vcnt[11] ? (osd_vcnt[7] && (osd_vcnt[6:0] >= 4) && (osd_vcnt[6:0] < 19)) :
-								(info && (rot == 3)) ? !osd_vcnt[21:8] :
+								(info_s2 && (rot == 3)) ? !osd_vcnt[21:8] :
 			               (osd_vcnt < osd_h)
 								);
 			osd_hcnt <= 0;
 			osd_hcnt2 <= 0;
-			if(info && rot == 1) osd_hcnt2 <= 22'd128-infoh;
+			if(info_s2 && rot == 1) osd_hcnt2 <= 22'd128-infoh;
 		end
 		if (osd_hcnt+1 == osd_w) osd_de[0] <= 0;
 
@@ -196,41 +204,41 @@ always @(posedge clk_video) begin
 		if(de_in && !deD) begin
 			h_cnt <= 0;
 			v_cnt <= v_cnt + 1'd1;
-			h_osd_start <= info ? (rot[0] ? infoy : infox) : (((dsp_width - osd_w)>>1) - 2'd2);
+			h_osd_start <= info_s2 ? (rot[0] ? infoy : infox) : (((dsp_width - osd_w)>>1) - 2'd2);
 
 			if(h_cnt > {dsp_width, 2'b00}) begin
 				v_cnt <= 1;
 				f1 <= ~f1; // skip every other frame for interlace compatibility.
 				if(~f1) begin
 
-					osd_en <= (osd_en << 1) | osd_enable;
-					if(~osd_enable) osd_en <= 0;
+					osd_en <= (osd_en << 1) | osd_enable_s2;
+					if(~osd_enable_s2) osd_en <= 0;
 
 					half <= 0;
 					if(v_cnt_h) begin
 						multiscan <= 0;
-						v_osd_start <= info ? v_info_start_h : v_osd_start_h;
+						v_osd_start <= info_s2 ? v_info_start_h : v_osd_start_h;
 						half <= 1;
 					end
 					else if(v_cnt_1 | (rot[0] & v_cnt_2)) begin
 						multiscan <= 0;
-						v_osd_start <= info ? v_info_start_1 : v_osd_start_1;
+						v_osd_start <= info_s2 ? v_info_start_1 : v_osd_start_1;
 					end
 					else if(rot[0] ? v_cnt_3 : v_cnt_2) begin
 						multiscan <= 1;
-						v_osd_start <= info ? v_info_start_2 : v_osd_start_2;
+						v_osd_start <= info_s2 ? v_info_start_2 : v_osd_start_2;
 					end
 					else if(rot[0] ? v_cnt_4 : v_cnt_3) begin
 						multiscan <= 2;
-						v_osd_start <= info ? v_info_start_3 : v_osd_start_3;
+						v_osd_start <= info_s2 ? v_info_start_3 : v_osd_start_3;
 					end
 					else if(rot[0] | v_cnt_4) begin
 						multiscan <= 3;
-						v_osd_start <= info ? v_info_start_4 : v_osd_start_4;
+						v_osd_start <= info_s2 ? v_info_start_4 : v_osd_start_4;
 					end
 					else begin
 						multiscan <= 4;
-						v_osd_start <= info ? v_info_start_5 : v_osd_start_5;
+						v_osd_start <= info_s2 ? v_info_start_5 : v_osd_start_5;
 					end
 				end
 			end
@@ -239,12 +247,12 @@ always @(posedge clk_video) begin
 			if(osd_div == multiscan) begin
 				osd_div <= 0;
 				if(~osd_vcnt[10]) osd_vcnt <= osd_vcnt + 1'd1 + half;
-				if(osd_vcnt == 'b100010011111 && ~info) osd_vcnt <= 0;
+				if(osd_vcnt == 'b100010011111 && ~info_s2) osd_vcnt <= 0;
 			end
 			if(v_osd_start == v_cnt) begin
 				{osd_div,osd_vcnt} <= 0;
-				if(info && rot == 3) osd_vcnt <= 22'd256-infow;
-				else if(OSD_HDR && !rot) osd_vcnt <= {~info, 3'b000, ~info, 7'b0000000};
+				if(info_s2 && rot == 3) osd_vcnt <= 22'd256-infow;
+				else if(OSD_HDR && !rot) osd_vcnt <= {~info_s2, 3'b000, ~info_s2, 7'b0000000};
 			end
 		end
 

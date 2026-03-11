@@ -21,3 +21,16 @@ set_false_path -from [get_registers {*shadowmask*mask_rotate}] -to [get_register
 set_false_path -from [get_registers {*shadowmask*mask_2x}] -to [get_registers {*shadowmask*mask_2x_s1}]
 set_false_path -from [get_registers {*shadowmask*hmax*}] -to [get_registers {*shadowmask*hmax_s1*}]
 set_false_path -from [get_registers {*shadowmask*vmax*}] -to [get_registers {*shadowmask*vmax_s1*}]
+
+# OSD CDC: control and configuration signals written from clk_sys,
+# used in clk_video. All quasi-static (change on OSD menu interaction only).
+set_false_path -from [get_registers {*_osd|osd_enable}] -to [get_registers {*_osd|osd_enable_s1}]
+set_false_path -from [get_registers {*_osd|info}] -to [get_registers {*_osd|info_s1}]
+set_false_path -from [get_registers {*_osd|osd_h*}]
+set_false_path -from [get_registers {*_osd|osd_t*}]
+set_false_path -from [get_registers {*_osd|osd_w*}]
+set_false_path -from [get_registers {*_osd|infox*}]
+set_false_path -from [get_registers {*_osd|infoy*}]
+set_false_path -from [get_registers {*_osd|infow*}]
+set_false_path -from [get_registers {*_osd|infoh*}]
+set_false_path -from [get_registers {*_osd|osd_buffer*}]
