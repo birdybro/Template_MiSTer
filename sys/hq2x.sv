@@ -65,9 +65,18 @@ reg  curbuf;
 reg  prevbuf = 0;
 wire iobuf = !curbuf;
 
+// Register mux outputs to break 4:1 mux → DiffCheck combinational path.
+// cyc only changes on ce_in which is at most every 4th clk cycle,
+// so the registered values settle well before the next ce_in capture.
+reg [23:0] diff_input0, diff_input1;
+always @(posedge clk) begin
+	diff_input0 <= (cyc == 0) ? Prev0 : (cyc == 1) ? Curr0 : (cyc == 2) ? Prev2 : Next1;
+	diff_input1 <= (cyc == 0) ? Prev1 : (cyc == 1) ? Next0 : (cyc == 2) ? Curr2 : Next2;
+end
+
 wire diff0, diff1;
-DiffCheck diffcheck0(Curr1, (cyc == 0) ? Prev0 : (cyc == 1) ? Curr0 : (cyc == 2) ? Prev2 : Next1, diff0);
-DiffCheck diffcheck1(Curr1, (cyc == 0) ? Prev1 : (cyc == 1) ? Next0 : (cyc == 2) ? Curr2 : Next2, diff1);
+DiffCheck diffcheck0(Curr1, diff_input0, diff0);
+DiffCheck diffcheck1(Curr1, diff_input1, diff1);
 
 wire [7:0] new_pattern = {diff1, diff0, pattern[7:2]};
 
