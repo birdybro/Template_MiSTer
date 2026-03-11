@@ -101,10 +101,16 @@ always @(posedge clk_sys) if (gamma_wr) begin
 end
 
 reg [7:0] gamma_index_r,gamma_index_g,gamma_index_b;
+reg [7:0] gamma_rd_r, gamma_rd_g, gamma_rd_b;
+
+// Registered RAM reads — runs every clk_vid so data is ready before next ce_pix
+always @(posedge clk_vid) begin
+	gamma_rd_r <= gamma_curve_r[gamma_index_r];
+	gamma_rd_g <= gamma_curve_g[gamma_index_g];
+	gamma_rd_b <= gamma_curve_b[gamma_index_b];
+end
 
 always @(posedge clk_vid) begin
-	reg [7:0] R_in, G_in, B_in;
-	reg [7:0] R_gamma, G_gamma;
 	reg       hs,vs,hb,vb,de;
 
 	if(ce_pix) begin
@@ -113,8 +119,8 @@ always @(posedge clk_vid) begin
 		hb <= HBlank; vb <= VBlank;
 		de <= DE;
 
-		RGB_out  <= gamma_en ? {gamma_curve_r[gamma_index_r],gamma_curve_g[gamma_index_g],gamma_curve_b[gamma_index_b]}
-	                        : {gamma_index_r,gamma_index_g,gamma_index_b};
+		RGB_out  <= gamma_en ? {gamma_rd_r,gamma_rd_g,gamma_rd_b}
+		                     : {gamma_index_r,gamma_index_g,gamma_index_b};
 		HSync_out <= hs; VSync_out <= vs;
 		HBlank_out <= hb; VBlank_out <= vb;
 		DE_out <= de;
