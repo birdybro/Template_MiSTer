@@ -26,6 +26,20 @@ reg        mask_rotate;
 reg        mask_enable;
 reg [10:0] mask_lut[256];
 
+// 2-FF synchronizers for control signals (clk_sys -> clk CDC)
+reg        mask_enable_s1, mask_enable_s2;
+reg        mask_rotate_s1, mask_rotate_s2;
+reg        mask_2x_s1, mask_2x_s2;
+reg  [4:0] hmax_s1, hmax_s2;
+reg  [4:0] vmax_s1, vmax_s2;
+always @(posedge clk) begin
+	mask_enable_s1 <= mask_enable; mask_enable_s2 <= mask_enable_s1;
+	mask_rotate_s1 <= mask_rotate; mask_rotate_s2 <= mask_rotate_s1;
+	mask_2x_s1     <= mask_2x;     mask_2x_s2     <= mask_2x_s1;
+	hmax_s1        <= hmax;        hmax_s2        <= hmax_s1;
+	vmax_s1        <= vmax;        vmax_s2        <= vmax_s1;
+end
+
 always @(posedge clk) begin
 	reg [4:0] hcount;
 	reg [4:0] vcount;
@@ -44,14 +58,14 @@ always @(posedge clk) begin
 	// hcount and vcount counts pixel rows and columns
 	// hindex and vindex half the value of the counters for double size patterns
 	// hindex2, vindex2 swap the h and v counters for drawing rotated masks
-	hindex <= mask_2x ? hcount[4:1] : hcount[3:0];
-	vindex <= mask_2x ? vcount[4:1] : vcount[3:0];
-	mask_idx <= mask_rotate ? {hindex,vindex} : {vindex,hindex};
+	hindex <= mask_2x_s2 ? hcount[4:1] : hcount[3:0];
+	vindex <= mask_2x_s2 ? vcount[4:1] : vcount[3:0];
+	mask_idx <= mask_rotate_s2 ? {hindex,vindex} : {vindex,hindex};
 
 	// hmax and vmax store these sizes
 	// hmax2 and vmax2 swap the values to handle rotation
-	hmax2 <= ((mask_rotate ? vmax : hmax) << mask_2x) | mask_2x;
-	vmax2 <= ((mask_rotate ? hmax : vmax) << mask_2x) | mask_2x;
+	hmax2 <= ((mask_rotate_s2 ? vmax_s2 : hmax_s2) << mask_2x_s2) | mask_2x_s2;
+	vmax2 <= ((mask_rotate_s2 ? hmax_s2 : vmax_s2) << mask_2x_s2) | mask_2x_s2;
 
 	pcnt <= pcnt+1'd1;
 	if(old_brd && ~brd_in) pde <= pcnt-4'd3;
@@ -76,7 +90,7 @@ always @(posedge clk) begin
 	lut <= mask_lut[mask_idx];
 
 	r_mul <= 5'b10000; g_mul <= 5'b10000; b_mul <= 5'b10000; // default 100% to all channels
-	if (mask_enable) begin
+	if (mask_enable_s2) begin
 		r_mul <= lut[10] ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
 		g_mul <= lut[9]  ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
 		b_mul <= lut[8]  ? {1'b1,lut[7:4]} : {1'b0,lut[3:0]};
