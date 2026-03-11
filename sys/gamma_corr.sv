@@ -21,6 +21,13 @@ module gamma_corr
 
 (* ramstyle="no_rw_check" *) reg [7:0] gamma_curve[768];
 
+// 2-FF synchronizer for gamma_en (clk_sys -> clk_vid CDC)
+reg gamma_en_s1, gamma_en_s2;
+always @(posedge clk_vid) begin
+	gamma_en_s1 <= gamma_en;
+	gamma_en_s2 <= gamma_en_s1;
+end
+
 always @(posedge clk_sys) if (gamma_wr) gamma_curve[gamma_wr_addr] <= gamma_value;
 always @(posedge clk_vid) gamma <= gamma_curve[gamma_index];
 
@@ -40,7 +47,7 @@ always @(posedge clk_vid) begin
 		hs <= HSync; vs <= VSync;
 		hb <= HBlank; vb <= VBlank;
 
-		RGB_out  <= gamma_en ? {R_gamma,G_gamma,gamma} : {R_in,G_in,B_in};
+		RGB_out  <= gamma_en_s2 ? {R_gamma,G_gamma,gamma} : {R_in,G_in,B_in};
 		HSync_out <= hs; VSync_out <= vs;
 		HBlank_out <= hb; VBlank_out <= vb;
 
@@ -92,6 +99,13 @@ wire       gamma_wr = gamma_bus[18];
 wire [9:0] gamma_wr_addr = gamma_bus[17:8];
 wire [7:0] gamma_value = gamma_bus[7:0];
 
+// 2-FF synchronizer for gamma_en (clk_sys -> clk_vid CDC)
+reg gamma_en_s1, gamma_en_s2;
+always @(posedge clk_vid) begin
+	gamma_en_s1 <= gamma_en;
+	gamma_en_s2 <= gamma_en_s1;
+end
+
 always @(posedge clk_sys) if (gamma_wr) begin
 	case(gamma_wr_addr[9:8])
 		0: gamma_curve_r[gamma_wr_addr[7:0]] <= gamma_value;
@@ -119,8 +133,8 @@ always @(posedge clk_vid) begin
 		hb <= HBlank; vb <= VBlank;
 		de <= DE;
 
-		RGB_out  <= gamma_en ? {gamma_rd_r,gamma_rd_g,gamma_rd_b}
-		                     : {gamma_index_r,gamma_index_g,gamma_index_b};
+		RGB_out  <= gamma_en_s2 ? {gamma_rd_r,gamma_rd_g,gamma_rd_b}
+		                        : {gamma_index_r,gamma_index_g,gamma_index_b};
 		HSync_out <= hs; VSync_out <= vs;
 		HBlank_out <= hb; VBlank_out <= vb;
 		DE_out <= de;
