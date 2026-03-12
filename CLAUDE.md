@@ -53,6 +53,28 @@ Enable by uncommenting `set_global_assignment -name VERILOG_MACRO` lines in `Tem
 - `MISTER_DOWNSCALE_NN` — Nearest-neighbor downscaling
 - `MISTER_DISABLE_ADAPTIVE` — Disable adaptive scanlines
 
+## Timing and CDC Patterns
+
+The framework has two main clock domains: `clk_sys` (HPS/ARM side, 100MHz) and the video clock (`CLK_VIDEO` / `clk_vid` / `clk`, derived from core PLL). Several framework modules cross between them. When modifying `sys/` or adding features that touch these domains:
+
+### Clock Domain Crossings
+
+- **Control signals** (1-bit, quasi-static): Use a 2-FF synchronizer into the destination domain. Examples: `gamma_en`, `osd_enable`, `mask_enable`.
+- **Multi-bit configuration** (dimensions, positions): These change only on user menu interaction. Use SDC `set_false_path` constraints rather than synchronizers, since individual bits may arrive at different times but the values are stable for thousands of cycles before use.
+- **Dual-clock RAMs** (LUTs written on `clk_sys`, read on video clk): Use `(* ramstyle="no_rw_check" *)` and add SDC false paths from the RAM write registers to the read-side registers. Data is loaded at boot/config time, stable before reads.
+- **`gamma_bus[20]` carries `clk_sys` on general routing** (not a dedicated clock network). SDC false paths on gamma write paths compensate for the fitter not tracing this back to `h2f_user0_clk`.
+
+### Combinational Path Guidelines
+
+- **Prefer explicit multiplies over shift-and-add chains** for constant multiplication. Quartus maps explicit multiplies to DSP blocks (~2ns) instead of building fabric adder trees (~9ns for 6-input chains). The Cyclone V has 112 DSP blocks.
+- **Register RAM read outputs** in a separate always block before using them in output muxes. Combinational RAM reads through muxes prevent Quartus from using M10K synchronous read ports.
+- **When `ce_pix`/`ce_in` gates logic**, combinational paths between registers still must meet full `CLK_VIDEO` timing. Register wide mux outputs on every `clk` edge (ungated) so downstream combinational logic has multiple cycles to settle before the next `ce_in`.
+
+### SDC Constraints
+
+- `sys_top.sdc`: Framework-level constraints (clock groups, pin false paths, OSD/scaler relaxations). Declares `clk_sys` and video PLL clocks as exclusive groups.
+- `Template.sdc`: Core-specific constraints. Add false paths here for any new CDC paths your core introduces (gamma, shadowmask, OSD config signals all have entries).
+
 ## Conventions
 
 - Release binaries go in `releases/` with format `<core_name>_YYYYMMDD.rbf`
