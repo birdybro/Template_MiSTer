@@ -1584,6 +1584,7 @@ audio_out audio_out
 	.cy2(acy2),
 
 	.is_signed(audio_s),
+	.clk_core(clk_sys),
 	.core_l(audio_l),
 	.core_r(audio_r),
 
